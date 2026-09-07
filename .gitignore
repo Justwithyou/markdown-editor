@@ -1,0 +1,88 @@
+# ============================================================
+# Markdown-Editor .gitignore
+#
+# 项目定位：纯静态三文件（index.html + css/ + js/），无构建步骤。
+# 本文件的目的是确保推上 GitHub 的只有源码与文档，
+# 依赖、构建产物、本地运行输出一律排除。
+# ============================================================
+
+# ---------- 依赖目录 ----------
+node_modules/
+jspm_packages/
+bower_components/
+.pnpm-store/
+.yarn/
+
+# ---------- 构建产物 / 打包输出 ----------
+dist/
+dist-ssr/
+build/
+out/
+.output/
+.vite/
+.turbo/
+.parcel-cache/
+.webpack/
+.nuxt/
+.next/
+.svelte-kit/
+
+# ---------- 包管理器日志 ----------
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ---------- 环境变量（含密钥，务必排除） ----------
+.env
+.env.local
+.env.*.local
+
+# ---------- 日志与本地运行输出 ----------
+logs/
+*.log
+server.log
+nohup.out
+
+# ---------- 测试覆盖率 ----------
+coverage/
+*.lcov
+.nyc_output/
+
+# ---------- 缓存 ----------
+.cache/
+.eslintcache
+.stylelintcache
+
+# ---------- 编辑器 / IDE ----------
+.vscode/
+.idea/
+*.suo
+*.sln
+*.swp
+*.swo
+*~
+
+# ---------- 操作系统 ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------- 临时文件 ----------
+*.tmp
+*.temp
+*.bak
+*.orig
+temp/
+tmp/
+
+# ---------- 文档站构建产物 ----------
+site/
+docs/.vitepress/dist/
+docs/.vitepress/cache/
+
+# ---------- 本地工具数据 ----------
+# 工作区 Agent 数据 / 内网穿透配置，均属本地运行产物
+.workbuddy/
+.cpolar/

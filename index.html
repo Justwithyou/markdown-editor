@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MD · Markdown 编辑器</title>
+  <meta name="description" content="MD - 支持微信样式的 Markdown 编辑器">
+
+  <!-- highlight.js -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.9.0/styles/github.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.9.0/highlight.min.js"></script>
+
+  <!-- KaTeX -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+  <!-- Mermaid -->
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
+
+  <!-- marked v4 (stable API with highlight support) -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
+
+  <!-- DOMPurify -->
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="logo">
+        <span class="logo-icon">📝</span>
+        <span class="logo-text">Markdown-Editor</span>
+      </div>
+    </div>
+    <div class="header-center">
+      <div class="toolbar-group" style="display:none;">
+        <select id="themeSelect" class="theme-select" title="切换主题">
+          <option value="github">GitHub</option>
+          <option value="shanchui">山吹</option>
+          <option value="shanyue">山月</option>
+          <option value="condensed-night-purple">凝夜紫</option>
+        </select>
+      </div>
+      <div class="toolbar-divider" style="display:none;"></div>
+      <button class="header-btn" id="btnOutline" title="文档大纲">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="6" y1="12" x2="21" y2="12"/><line x1="9" y1="18" x2="21" y2="18"/></svg>
+        <span>大纲</span>
+      </button>
+      <button class="header-btn" id="btnAutoNumber" title="自动编号（一级/二级/三级标题）">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="14" y2="18"/></svg>
+        <span>自动编号</span>
+      </button>
+      <button class="header-btn" id="btnInsertTOC" title="插入目录">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        <span>插入目录</span>
+      </button>
+      <button class="header-btn" id="btnGridBg" title="方格背景">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="0"/><line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/></svg>
+        <span>方格背景</span>
+      </button>
+      <button class="header-btn" id="btnTemplate" title="使用模板">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+        <span>使用模板</span>
+      </button>
+      <button class="header-btn" id="btnWatermark" title="设置水印">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2.7c-3.2 0-4.9 2.6-4.9 5.3 0 4.2 3.6 7.1 4.9 8.6 1.3-1.5 4.9-4.4 4.9-8.6 0-2.7-1.7-5.3-4.9-5.3z"/><circle cx="12" cy="8" r="1.6"/><path d="M4 21.3c2.4-1.6 5-2.4 8-2.4s5.6.8 8 2.4"/></svg>
+        <span>水印</span>
+      </button>
+    </div>
+    <div class="header-right">
+      <button class="header-btn" id="btnOpenFile" title="打开本地 Markdown 文件">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        <span>打开</span>
+      </button>
+      <input type="file" id="fileInput" accept=".md,.markdown,.txt,.mdx" style="display:none;">
+      <button class="header-btn" id="btnLinks" title="Markdown 在线工具与开源项目导航">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <span>更多工具</span>
+      </button>
+      <button class="header-btn" id="btnLinkFootnote" title="微信外链转脚注">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        <span>外链转脚注</span>
+      </button>
+      <button class="header-btn primary" id="btnCopy" title="复制到剪贴板">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        <span>复制</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="app-main">
+    <!-- Editor Panel -->
+    <section class="editor-panel" id="editorPanel">
+      <div class="editor-toolbar">
+        <div class="toolbar-group">
+          <button class="tool-btn" data-action="bold" title="粗体 (Ctrl+B)">
+            <strong>B</strong>
+          </button>
+          <button class="tool-btn" data-action="italic" title="斜体 (Ctrl+I)">
+            <em>I</em>
+          </button>
+          <button class="tool-btn" data-action="strikethrough" title="删除线">
+            <s>S</s>
+          </button>
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="toolbar-group">
+          <button class="tool-btn" data-action="h1" title="一级标题">H1</button>
+          <button class="tool-btn" data-action="h2" title="二级标题">H2</button>
+          <button class="tool-btn" data-action="h3" title="三级标题">H3</button>
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="toolbar-group">
+          <button class="tool-btn" data-action="link" title="链接 (Ctrl+K)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          </button>
+          <button class="tool-btn" data-action="image" title="图片">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+          </button>
+          <button class="tool-btn" data-action="code" title="行内代码 (Shift+Ctrl+K)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+          </button>
+          <button class="tool-btn" data-action="codeblock" title="代码块 (Shift+Ctrl+C)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="9 9 7 12 9 15"/><polyline points="15 9 17 12 15 15"/></svg>
+          </button>
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="toolbar-group">
+          <button class="tool-btn" data-action="ul" title="无序列表 (Shift+Ctrl+U)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/></svg>
+          </button>
+          <button class="tool-btn" data-action="ol" title="有序列表 (Shift+Ctrl+O)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><text x="1" y="8" font-size="7" fill="currentColor" stroke="none">1</text><text x="1" y="14" font-size="7" fill="currentColor" stroke="none">2</text><text x="1" y="20" font-size="7" fill="currentColor" stroke="none">3</text></svg>
+          </button>
+          <button class="tool-btn" data-action="task" title="任务列表">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          </button>
+          <button class="tool-btn" data-action="quote" title="引用">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2-2-2H4c-1.25 0-2 .75-2 2v6c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V21z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2-2-2h-4c-1.25 0-2 .75-2 2v6c0 1.25.75 2 2 2h.75c0 2.25-.25 4-2.75 4v3z"/></svg>
+          </button>
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="toolbar-group">
+          <button class="tool-btn" data-action="hr" title="分割线">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="12" x2="20" y2="12"/></svg>
+          </button>
+          <button class="tool-btn" data-action="table" title="表格">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+          </button>
+          <button class="tool-btn" data-action="formula" title="数学公式">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v4H4zM4 16h16v4H4zM4 10h16v4H4z"/></svg>
+          </button>
+          <button class="tool-btn" data-action="mermaid" title="Mermaid 图表">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="8" width="6" height="8" rx="1"/><rect x="16" y="8" width="6" height="8" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><rect x="9" y="16" width="6" height="6" rx="1"/></svg>
+          </button>
+        </div>
+        <div class="toolbar-spacer"></div>
+        <div class="toolbar-group">
+          <button class="tool-btn" id="btnUrlFetch" title="URL 链接采集">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          </button>
+          <button class="tool-btn" id="btnClear" title="清空内容">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="editor-wrap">
+        <textarea id="editor" class="editor" placeholder="在此输入 Markdown 内容..." spellcheck="false"></textarea>
+      </div>
+      <div class="editor-statusbar">
+        <span id="charCount">0 字符</span>
+        <span id="wordCount">0 词</span>
+        <span id="lineCount">1 行</span>
+        <span class="status-spacer"></span>
+        <span class="status-hint">支持 Markdown 语法 · Ctrl+B 粗体 · Ctrl+I 斜体 · Ctrl+S 保存</span>
+      </div>
+    </section>
+
+    <!-- Resizer -->
+    <div class="resizer" id="resizer"></div>
+
+    <!-- Preview Panel -->
+    <section class="preview-panel" id="previewPanel">
+      <div class="preview-toolbar">
+        <div class="toolbar-group" id="fsWidthGroup" style="display:none;">
+          <span class="width-label">页宽</span>
+          <button class="width-btn" data-width="680" title="窄 (680px)">窄</button>
+          <button class="width-btn" data-width="880" title="中 (880px)">中</button>
+          <button class="width-btn" data-width="1100" title="宽 (1100px)">宽</button>
+          <button class="width-btn" data-width="1400" title="超宽 (1400px)">超宽</button>
+          <button class="width-btn" data-width="0" title="铺满屏幕">全屏宽</button>
+        </div>
+        <div class="toolbar-spacer"></div>
+        <div class="toolbar-group">
+          <button class="tool-btn" id="btnPreviewScroll" title="同步滚动">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          </button>
+          <button class="tool-btn" id="btnFullscreen" title="全屏预览">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+          </button>
+          <button class="tool-btn" id="btnExitFs" title="退出全屏" style="display:none;color:var(--danger);">退出全屏</button>
+        </div>
+      </div>
+      <div class="preview-wrap" id="previewWrap">
+        <div class="preview-scroll" id="previewScroll">
+          <div class="markdown-body theme-github" id="preview">
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Template Modal -->
+  <div class="modal-overlay" id="templateModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>模板管理</h3>
+        <button class="modal-close" id="modalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="template-layout">
+          <div class="template-list" id="templateList">
+          </div>
+          <div class="template-editor">
+            <div class="template-form">
+              <input type="text" id="templateName" class="template-input" placeholder="模板名称">
+              <textarea id="templateContent" class="template-textarea" placeholder="模板内容（使用 {{ content }} 作为正文占位符）"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="btnTemplateNew">新建模板</button>
+        <button class="btn-secondary" id="btnTemplateDelete">删除</button>
+        <button class="btn-primary" id="btnTemplateSave">保存模板</button>
+        <button class="btn-primary" id="btnTemplateApply">应用模板</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- URL Fetch Modal -->
+  <div class="modal-overlay" id="urlModal">
+    <div class="modal modal-sm">
+      <div class="modal-header">
+        <h3>URL 链接采集</h3>
+        <button class="modal-close" id="urlModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">输入网页 URL，将自动提取 Markdown 内容</p>
+        <input type="text" id="urlInput" class="template-input" placeholder="https://example.com/article" style="width:100%;">
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="urlCancel">取消</button>
+        <button class="btn-primary" id="urlConfirm">采集</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Links / Resources Modal -->
+  <div class="modal-overlay" id="linksModal">
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h3>Markdown 工具与开源项目导航</h3>
+        <button class="modal-close" id="linksModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="links-tabs">
+          <button class="links-tab active" data-cat="tools">在线工具</button>
+          <button class="links-tab" data-cat="oss">开源项目</button>
+          <button class="links-tab" data-cat="syntax">语法/图床</button>
+        </div>
+        <div class="links-list" id="linksList"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Watermark Modal -->
+  <div class="modal-overlay" id="watermarkModal">
+    <div class="modal modal-md">
+      <div class="modal-header">
+        <h3>水印设置</h3>
+        <button class="modal-close" id="watermarkModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="wm-layout">
+          <div class="wm-form">
+            <label class="wm-switch">
+              <input type="checkbox" id="wmEnabled">
+              <span>启用水印</span>
+            </label>
+
+            <div class="wm-field">
+              <label for="wmText">水印文字</label>
+              <input type="text" id="wmText" class="template-input" placeholder="例如：@公众号名称 · 转载请注明出处">
+            </div>
+
+            <div class="wm-field">
+              <label for="wmPreset">快捷预设</label>
+              <div class="wm-presets" id="wmPresets">
+                <button type="button" class="width-btn" data-text="@公众号名称">@公众号名称</button>
+                <button type="button" class="width-btn" data-text="未经授权 禁止转载">未经授权 禁止转载</button>
+                <button type="button" class="width-btn" data-text="内部资料 请勿外传">内部资料 请勿外传</button>
+              </div>
+            </div>
+
+            <div class="wm-grid">
+              <div class="wm-field">
+                <label for="wmColor">颜色</label>
+                <input type="color" id="wmColor">
+              </div>
+              <div class="wm-field">
+                <label for="wmFontSize">字号 <em class="wm-val" id="wmFontSizeVal">16px</em></label>
+                <input type="range" id="wmFontSize" min="10" max="48" step="1">
+              </div>
+              <div class="wm-field">
+                <label for="wmOpacity">不透明度 <em class="wm-val" id="wmOpacityVal">12%</em></label>
+                <input type="range" id="wmOpacity" min="3" max="60" step="1">
+              </div>
+              <div class="wm-field">
+                <label for="wmAngle">旋转角度 <em class="wm-val" id="wmAngleVal">-30°</em></label>
+                <input type="range" id="wmAngle" min="-90" max="90" step="1">
+              </div>
+              <div class="wm-field wm-field-wide">
+                <label for="wmGap">排列间距 <em class="wm-val" id="wmGapVal">180px</em></label>
+                <input type="range" id="wmGap" min="80" max="360" step="10">
+              </div>
+            </div>
+
+            <label class="wm-switch">
+              <input type="checkbox" id="wmOnCopy" checked>
+              <span>复制到公众号时带上水印</span>
+            </label>
+
+            <p class="modal-hint">水印只影响预览和复制结果，不会改动 Markdown 源码。公众号编辑器可能过滤部分样式，粘贴后请确认效果。</p>
+          </div>
+
+          <div class="wm-preview">
+            <div class="wm-preview-title">效果预览</div>
+            <div class="wm-preview-box" id="wmPreviewBox">
+              <p>这是正文示例文字。</p>
+              <p>Markdown 渲染后的内容会显示在水印之上，水印不会遮挡阅读。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" id="wmReset">恢复默认</button>
+        <button class="btn-secondary" id="wmCancel">取消</button>
+        <button class="btn-primary" id="wmApply">应用</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating Outline Panel -->
+  <div class="outline-panel" id="outlinePanel">
+    <div class="outline-header">
+      <span>文档大纲</span>
+      <button class="outline-close" id="outlineClose">&times;</button>
+    </div>
+    <div class="outline-body" id="outlineBody"></div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
