@@ -86,3 +86,6 @@ docs/.vitepress/cache/
 # 工作区 Agent 数据 / 内网穿透配置，均属本地运行产物
 .workbuddy/
 .cpolar/
+
+# ---------- 本地 Git 凭据（PAT 等，仓库不入） ----------
+git-config.md
