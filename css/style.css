@@ -87,8 +87,12 @@ body {
   white-space: nowrap;
 }
 
+/* 页头图标直接用站点图标文件本身，与标签页 / 桌面快捷方式是同一份图案 */
 .logo-icon {
-  font-size: 24px;
+  display: block;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
 }
 
 .logo-sub {
@@ -155,6 +159,82 @@ body {
   width: 1px;
   height: 20px;
   background: var(--border-color);
+}
+
+/* ===== Export Dropdown ===== */
+.export-wrap {
+  position: relative;
+}
+
+.export-caret {
+  margin-left: -2px;
+  opacity: .55;
+  transition: transform .15s ease;
+}
+
+.export-wrap.open .export-caret {
+  transform: rotate(180deg);
+}
+
+.export-wrap.open .header-btn {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+.export-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 216px;
+  padding: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  display: none;
+  z-index: 1200;
+}
+
+.export-menu.show {
+  display: block;
+}
+
+.export-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.export-item:hover {
+  background: var(--bg-hover);
+}
+
+.export-item svg {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+}
+
+.export-item:hover svg {
+  color: var(--accent);
+}
+
+.export-item .export-ext {
+  margin-left: auto;
+  padding-left: 14px;
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 /* ===== Main Layout ===== */
@@ -285,6 +365,16 @@ body {
   opacity: .7;
 }
 
+/* Shown only when the document carries YAML front matter */
+.status-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+  border-radius: 999px;
+  padding: 1px 8px;
+  user-select: none;
+}
+
 /* ===== Resizer ===== */
 .resizer {
   width: 6px;
@@ -341,6 +431,8 @@ body {
   padding: 0 8px;
   gap: 4px;
   flex-shrink: 0;
+  /* 档位平铺后工具栏内容变长：装不下时横向滚动，而不是把按钮压变形 */
+  overflow-x: auto;
 }
 
 .preview-wrap {
@@ -359,7 +451,9 @@ body {
 /* ===== Markdown Body (Preview) ===== */
 .markdown-body {
   width: 100%;
-  max-width: 820px;
+  /* 版心：设备档给一个视口宽（--dev-max），再压一道 820px 的默认上限。
+     PC 档不设变量，回落到 820px，与改造前一致。 */
+  max-width: min(var(--dev-max, 820px), 820px);
   min-height: 100%;
   padding: 40px;
   border-radius: var(--radius);
@@ -372,6 +466,71 @@ body {
     linear-gradient(to right, rgba(0,0,0,.03) 1px, transparent 1px),
     linear-gradient(to bottom, rgba(0,0,0,.03) 1px, transparent 1px);
   background-size: 20px 20px;
+}
+
+/* ===== 引用块排版基线（4 套主题共用）=====
+   两件事，缺一个都会让「多行 `>` 引用」看起来丢格式：
+
+   1) 首/末子元素的外边距归零。晴空蓝的引用块自带上下 padding，
+      若末元素（段落、代码块、列表）保留自己的下外边距，框内会多出一段空白。
+   2) **不能**把引用内所有 p 的 margin 一律清零。GitHub 主题原本写了
+      `blockquote p { margin: 0 }`，结果多段引用（`> 甲` + `>` + `> 乙`）实测段间距为
+      0px，两段直接粘成一坨。正确做法与 GitHub 官网一致：只清首尾，
+      中间段仍由 p 自身的 margin 分段。 */
+.markdown-body blockquote > :first-child { margin-top: 0; }
+.markdown-body blockquote > :last-child { margin-bottom: 0; }
+
+/* ===== Preview Mode: 设备端 =====
+   只有一个维度：设备端。每档都隐含「这个尺寸下最典型的阅读场景」，所以不再单列平台档，
+   平台规则直接内建在设备档里：
+     PC   → 浏览器实际宽度，Web 排版（不套约束，主题原貌）
+     iPad → 视口 768px，Web 排版 + 平板适配（正文放大一档、行距略松、内边距加宽）
+     APP  → 视口 375px，公众号排版（正文 17px / 字距 .5px，长代码行按微信规则硬折行）
+   它们与主题（.theme-*）正交：主题负责配色与标题装饰，这里只接管版心与排版度量。
+   选择器写成 .markdown-body.xxx 是有意的 —— 提高一级特异性，才能压过 .theme-* 的度量声明，
+   否则「设备字号」会被主题字号顶掉，切档看着毫无反应。 */
+
+/* PC 是基准态：不设 --dev-max，回落到默认 820px，也不套屏幕底衬。 */
+
+/* iPad —— 排版基调仍是 Web，但按平板的屏宽与观看距离做适配：
+   屏幕比桌面窄、比手机宽，正文放大一档、行距略松，内边距留得更宽，标题相应收一点。 */
+.markdown-body.device-ipad {
+  --dev-max: 768px;
+  padding: 40px 36px;
+  border-radius: 14px;
+  font-size: 17px;
+  line-height: 1.7;
+}
+.markdown-body.device-ipad p { margin: 0 0 1.2em; }
+.markdown-body.device-ipad h1 { font-size: 1.8em; }
+.markdown-body.device-ipad h2 { font-size: 1.4em; }
+.markdown-body.device-ipad pre { font-size: .84em; }
+
+/* APP —— 就是「手机上读公众号」的观感：
+   公众号正文版心 677px 明显宽于手机屏，所以实际版心由 375px 视口决定（min() 取小者）；
+   正文 17px / 行高 1.75 / 字距 .5px 按微信正文度量，长代码行按微信规则硬折行。 */
+.markdown-body.device-app {
+  --dev-max: 375px;
+  padding: 22px 16px;
+  border-radius: 18px;
+  font-size: 17px;
+  line-height: 1.75;
+  letter-spacing: .5px;
+}
+.markdown-body.device-app p { margin: 0 0 1.4em; }
+.markdown-body.device-app h1 { font-size: 1.6em; }
+.markdown-body.device-app h2 { font-size: 1.3em; }
+/* 微信正文不支持横向滚动，长代码行会被硬折断 —— 预览就按折行显示，提前暴露问题 */
+.markdown-body.device-app pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.markdown-body.device-app img { width: 100%; height: auto; }
+.markdown-body.device-app table { font-size: .92em; }
+
+/* iPad / APP 下把版心之外的底衬压深一档，设备边界才看得出来（否则只是一块白） */
+.preview-scroll.device-frame {
+  background: var(--bg-toolbar);
 }
 
 /* ===== Theme: GitHub ===== */
@@ -393,8 +552,9 @@ body {
 .theme-github p { margin: 0 0 16px; }
 .theme-github a { color: #0969da; text-decoration: none; }
 .theme-github a:hover { text-decoration: underline; }
-.theme-github blockquote { margin: 0 0 16px; padding: 0 16px; color: #57606a; border-left: .25em solid #d0d7de; }
-.theme-github blockquote p { margin: 0; }
+.theme-github blockquote { margin: 0 0 16px; padding: 0 16px; border-left: .25em solid #d0d7de; }
+/* 取次要色只作用于正文文本：放在 blockquote 上会让引用里的 h1–h6 一起变灰，层级感丢失 */
+.theme-github blockquote p, .theme-github blockquote li { color: #57606a; }
 .theme-github code { font-family: "JetBrains Mono", Consolas, monospace; font-size: 85%; padding: .2em .4em; background: rgba(175,184,193,.2); border-radius: 6px; }
 .theme-github pre { padding: 16px; overflow: auto; font-size: 85%; line-height: 1.45; border-radius: 6px; background: #f6f8fa; margin: 0 0 16px; }
 .theme-github pre code { padding: 0; background: none; font-size: 100%; }
@@ -410,8 +570,8 @@ body {
 .theme-github del { color: #57606a; }
 .theme-github kbd { display: inline-block; padding: 3px 5px; font-size: 11px; line-height: 10px; color: #1f2328; background-color: #f6f8fa; border: 1px solid rgba(175,184,193,.4); border-radius: 6px; box-shadow: inset 0 -1px 0 rgba(175,184,193,.4); }
 
-/* ===== Theme: 山吹 (Shanchui) ===== */
-.theme-shanchui {
+/* ===== Theme: 晴空蓝 (Qingkong) ===== */
+.theme-qingkong {
   background: #f7f7f7;
   color: #3f3f3f;
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -419,80 +579,24 @@ body {
   line-height: 1.8;
 }
 
-.theme-shanchui h1 { font-size: 1.8em; margin: 0 0 16px; font-weight: bold; text-align: center; color: #66CCFF; border-bottom: 2px solid #66CCFF; padding-bottom: 10px; }
-.theme-shanchui h2 { font-size: 1.4em; margin: 30px 0 16px; font-weight: bold; color: #66CCFF; border-left: 5px solid #66CCFF; padding-left: 12px; }
-.theme-shanchui h3 { font-size: 1.2em; margin: 24px 0 12px; font-weight: bold; color: #555; }
-.theme-shanchui h4 { font-size: 1.05em; margin: 20px 0 10px; font-weight: bold; color: #555; }
-.theme-shanchui p { margin: 0 0 16px; letter-spacing: .5px; }
-.theme-shanchui a { color: #66CCFF; text-decoration: none; border-bottom: 1px solid #66CCFF; }
-.theme-shanchui blockquote { margin: 0 0 16px; padding: 10px 16px; background: rgba(102,204,255,.08); border-left: 4px solid #66CCFF; color: #666; border-radius: 0 4px 4px 0; }
-.theme-shanchui code { font-family: Consolas, monospace; font-size: 90%; padding: 2px 6px; background: rgba(102,204,255,.12); color: #e83e8c; border-radius: 3px; }
-.theme-shanchui pre { padding: 16px; overflow: auto; border-radius: 4px; background: #2d2d2d; margin: 0 0 16px; }
-.theme-shanchui pre code { padding: 0; background: none; color: #f8f8f2; font-size: 100%; }
-.theme-shanchui ul, .theme-shanchui ol { margin: 0 0 16px; padding-left: 2em; }
-.theme-shanchui table { width: 100%; border-collapse: collapse; margin: 0 0 16px; }
-.theme-shanchui table th, .theme-shanchui table td { padding: 8px 12px; border: 1px solid #e0e0e0; }
-.theme-shanchui table th { background: rgba(102,204,255,.1); color: #333; font-weight: bold; }
-.theme-shanchui table tr:nth-child(even) { background: #fafafa; }
-.theme-shanchui img { max-width: 100%; border-radius: 4px; }
-.theme-shanchui hr { height: 1px; margin: 24px 0; border: none; background: linear-gradient(to right, transparent, #66CCFF, transparent); }
-
-/* ===== Theme: 山月 (Shanyue) ===== */
-.theme-shanyue {
-  background: #fff;
-  color: #2c3e50;
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 16px;
-  line-height: 1.75;
-}
-
-.theme-shanyue h1 { font-size: 1.7em; margin: 0 0 16px; font-weight: 700; color: #1a1a1a; text-align: center; }
-.theme-shanyue h2 { font-size: 1.35em; margin: 30px 0 14px; font-weight: 700; color: #1a1a1a; border-bottom: 1px solid #eee; padding-bottom: 8px; }
-.theme-shanyue h3 { font-size: 1.15em; margin: 24px 0 12px; font-weight: 600; color: #333; }
-.theme-shanyue h4 { font-size: 1em; margin: 20px 0 10px; font-weight: 600; color: #333; }
-.theme-shanyue p { margin: 0 0 14px; }
-.theme-shanyue a { color: #42b983; text-decoration: none; }
-.theme-shanyue a:hover { text-decoration: underline; }
-.theme-shanyue blockquote { margin: 0 0 14px; padding: 10px 16px; background: #f8f8f8; border-left: 4px solid #42b983; color: #666; }
-.theme-shanyue code { font-family: Consolas, monospace; font-size: 90%; padding: 2px 6px; background: #f0f0f0; color: #d63200; border-radius: 3px; }
-.theme-shanyue pre { padding: 14px 16px; overflow: auto; border-radius: 4px; background: #282c34; margin: 0 0 14px; }
-.theme-shanyue pre code { padding: 0; background: none; color: #abb2bf; font-size: 100%; }
-.theme-shanyue ul, .theme-shanyue ol { margin: 0 0 14px; padding-left: 1.8em; }
-.theme-shanyue table { width: 100%; border-collapse: collapse; margin: 0 0 14px; }
-.theme-shanyue table th, .theme-shanyue table td { padding: 8px 12px; border: 1px solid #e8e8e8; }
-.theme-shanyue table th { background: #42b983; color: #fff; font-weight: 600; }
-.theme-shanyue table tr:nth-child(even) { background: #f9f9f9; }
-.theme-shanyue img { max-width: 100%; }
-.theme-shanyue hr { height: 1px; margin: 24px 0; border: none; border-top: 2px dashed #eee; }
-
-/* ===== Theme: 凝夜紫 (Condensed Night Purple) ===== */
-.theme-condensed-night-purple {
-  background: #2d2d2d;
-  color: #ddd6fe;
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 16px;
-  line-height: 1.75;
-}
-
-.theme-condensed-night-purple h1 { font-size: 1.8em; margin: 0 0 16px; font-weight: bold; color: #a78bfa; text-align: center; border-bottom: 2px solid #4c1d95; padding-bottom: 10px; }
-.theme-condensed-night-purple h2 { font-size: 1.4em; margin: 30px 0 16px; font-weight: bold; color: #c4b5fd; border-left: 5px solid #7c3aed; padding-left: 12px; }
-.theme-condensed-night-purple h3 { font-size: 1.2em; margin: 24px 0 12px; font-weight: bold; color: #c4b5fd; }
-.theme-condensed-night-purple h4 { font-size: 1.05em; margin: 20px 0 10px; font-weight: bold; color: #ddd6fe; }
-.theme-condensed-night-purple p { margin: 0 0 16px; letter-spacing: .3px; }
-.theme-condensed-night-purple a { color: #a78bfa; text-decoration: none; border-bottom: 1px solid #7c3aed; }
-.theme-condensed-night-purple blockquote { margin: 0 0 16px; padding: 10px 16px; background: rgba(124,58,237,.15); border-left: 4px solid #7c3aed; color: #c4b5fd; border-radius: 0 4px 4px 0; }
-.theme-condensed-night-purple code { font-family: Consolas, monospace; font-size: 90%; padding: 2px 6px; background: rgba(167,139,250,.2); color: #f0abfc; border-radius: 3px; }
-.theme-condensed-night-purple pre { padding: 16px; overflow: auto; border-radius: 4px; background: #1e1e2e; margin: 0 0 16px; }
-.theme-condensed-night-purple pre code { padding: 0; background: none; color: #f0abfc; font-size: 100%; }
-.theme-condensed-night-purple ul, .theme-condensed-night-purple ol { margin: 0 0 16px; padding-left: 2em; }
-.theme-condensed-night-purple table { width: 100%; border-collapse: collapse; margin: 0 0 16px; }
-.theme-condensed-night-purple table th, .theme-condensed-night-purple table td { padding: 8px 12px; border: 1px solid #4c1d95; }
-.theme-condensed-night-purple table th { background: rgba(124,58,237,.3); color: #c4b5fd; font-weight: bold; }
-.theme-condensed-night-purple table tr:nth-child(even) { background: rgba(124,58,237,.1); }
-.theme-condensed-night-purple img { max-width: 100%; border-radius: 4px; }
-.theme-condensed-night-purple hr { height: 1px; margin: 24px 0; border: none; background: linear-gradient(to right, transparent, #7c3aed, transparent); }
-.theme-condensed-night-purple strong { color: #f0abfc; }
-.theme-condensed-night-purple del { color: #6b7280; }
+.theme-qingkong h1 { font-size: 1.8em; margin: 0 0 16px; font-weight: bold; text-align: center; color: #66CCFF; border-bottom: 2px solid #66CCFF; padding-bottom: 10px; }
+.theme-qingkong h2 { font-size: 1.4em; margin: 30px 0 16px; font-weight: bold; color: #66CCFF; border-left: 5px solid #66CCFF; padding-left: 12px; }
+.theme-qingkong h3 { font-size: 1.2em; margin: 24px 0 12px; font-weight: bold; color: #555; }
+.theme-qingkong h4 { font-size: 1.05em; margin: 20px 0 10px; font-weight: bold; color: #555; }
+.theme-qingkong p { margin: 0 0 16px; letter-spacing: .5px; }
+.theme-qingkong a { color: #66CCFF; text-decoration: none; border-bottom: 1px solid #66CCFF; }
+.theme-qingkong blockquote { margin: 0 0 16px; padding: 10px 16px; background: rgba(102,204,255,.08); border-left: 4px solid #66CCFF; border-radius: 0 4px 4px 0; }
+.theme-qingkong blockquote p, .theme-qingkong blockquote li { color: #666; }
+.theme-qingkong code { font-family: Consolas, monospace; font-size: 90%; padding: 2px 6px; background: rgba(102,204,255,.12); color: #e83e8c; border-radius: 3px; }
+.theme-qingkong pre { padding: 16px; overflow: auto; border-radius: 4px; background: #2d2d2d; margin: 0 0 16px; }
+.theme-qingkong pre code { padding: 0; background: none; color: #f8f8f2; font-size: 100%; }
+.theme-qingkong ul, .theme-qingkong ol { margin: 0 0 16px; padding-left: 2em; }
+.theme-qingkong table { width: 100%; border-collapse: collapse; margin: 0 0 16px; }
+.theme-qingkong table th, .theme-qingkong table td { padding: 8px 12px; border: 1px solid #e0e0e0; }
+.theme-qingkong table th { background: rgba(102,204,255,.1); color: #333; font-weight: bold; }
+.theme-qingkong table tr:nth-child(even) { background: #fafafa; }
+.theme-qingkong img { max-width: 100%; border-radius: 4px; }
+.theme-qingkong hr { height: 1px; margin: 24px 0; border: none; background: linear-gradient(to right, transparent, #66CCFF, transparent); }
 
 /* ===== Modal ===== */
 .modal-overlay {
@@ -894,15 +998,47 @@ body {
   color: var(--accent);
 }
 
+/* ===== Front Matter (文档元数据) ===== */
+/* 属性面板与标签胶囊的观感主要靠 buildFrontMatterBlock() 写出的内联样式
+   ——复制到公众号时 <style> 可能被剥离，内联样式才可靠。
+   这里只放内联样式表达不了的增强：过渡、选中抑制、窄屏降级。 */
+.fm-block {
+  font-size: 14px;
+}
+
+/* 预览工具栏只有 40px 高，档位下拉用紧凑尺寸 */
+.preview-toolbar .theme-select {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.fm-tag {
+  transition: opacity .15s ease;
+}
+
+.fm-block .fm-head,
+.fm-block .fm-warn {
+  user-select: none;
+}
+
+/* 窄屏下键列收窄，把宽度让给值 */
+@media (max-width: 720px) {
+  .fm-block .fm-key {
+    max-width: 120px !important;
+  }
+}
+
 /* ===== Fullscreen Page Width Control ===== */
 .width-label {
   font-size: 12px;
   color: var(--text-muted);
   margin-right: 2px;
   user-select: none;
+  white-space: nowrap;
 }
 
-.width-btn {
+.width-btn,
+.seg-btn {
   padding: 4px 10px;
   margin-left: 4px;
   border: 1px solid var(--border-color);
@@ -912,17 +1048,29 @@ body {
   color: var(--text-secondary);
   cursor: pointer;
   transition: all .15s ease;
+  /* 工具栏只有 40px 高，档位文字绝不能被挤成竖排 */
+  white-space: nowrap;
 }
 
-.width-btn:hover {
+.width-btn:hover,
+.seg-btn:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
 
-.width-btn.active {
+.width-btn.active,
+.seg-btn.active {
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
+}
+
+/* ===== Preview Mode Segmented Control (设备档) =====
+   档位全部平铺、点一下就切，比藏在 <select> 里少两次操作。
+   样式与「页宽」那排完全一致（复用 .width-btn 的盒子与激活态），只补一个成组容器。 */
+.seg-group {
+  display: flex;
+  align-items: center;
 }
 
 /* Paper-like page in fullscreen reading mode */
@@ -1174,5 +1322,96 @@ body {
   }
   .wm-preview-box {
     height: 180px;
+  }
+}
+
+/* ===== Print / 导出 PDF =====
+   导出 PDF 走「window.print() + @media print」这条路（零依赖、矢量输出），
+   所以这里必须把界面壳子全部摘掉，只留预览区。缺了这段，打印结果会带上
+   顶栏、编辑器和工具栏，还会被 .preview-wrap 的 overflow:auto 截成一页。 */
+@page {
+  margin: 16mm;
+}
+
+@media print {
+  /* 1) 界面壳子：顶栏、编辑器、分隔条、预览工具栏、浮层全部不打印 */
+  .app-header,
+  .editor-panel,
+  .resizer,
+  .preview-toolbar,
+  .outline-panel,
+  .toast,
+  .modal-overlay {
+    display: none !important;
+  }
+
+  /* 2) 解除 app 布局：body 的 flex + overflow:hidden 会把内容截断，
+       打印必须让它自然撑开，由分页接管 */
+  html,
+  body {
+    height: auto;
+    overflow: visible;
+  }
+  body {
+    display: block;
+    background: #fff;
+  }
+  .app-main {
+    display: block;
+    overflow: visible;
+  }
+
+  /* 3) 预览侧三层滚动容器逐层解开（.preview-panel → .preview-wrap → .preview-scroll） */
+  .preview-panel {
+    display: block;
+    position: static !important;
+    overflow: visible;
+    background: transparent;
+  }
+  .preview-wrap {
+    display: block;
+    position: static;
+    overflow: visible;
+  }
+  .preview-scroll {
+    display: block;
+    overflow: visible;
+    min-height: 0;
+    padding: 0;
+  }
+
+  /* 4) 页面卡片退化成普通文档流：@page 已经给了页边距，这里不再留白、
+        不要圆角与阴影（打印出来只会变成一圈脏边） */
+  .markdown-body {
+    width: auto;
+    max-width: none !important;
+    min-height: 0;
+    padding: 0 !important;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  /* 5) 代码块这类带深色背景的元素：浏览器默认不打印背景，深色块会掉成白纸黑框。
+        强制打印背景色，保证「所见即所得」。 */
+  #preview {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* 6) 分页：代码块 / 引用块 / 表格 / 图 / 公式块尽量不跨页，标题不落单 */
+  pre,
+  blockquote,
+  table,
+  .mermaid-rendered,
+  .katex-display,
+  .fm-block {
+    break-inside: avoid;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    break-after: avoid;
+  }
+  p, li {
+    orphans: 2;
+    widows: 2;
   }
 }

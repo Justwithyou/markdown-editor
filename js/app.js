@@ -7,13 +7,29 @@
   'use strict';
 
   // ===== State =====
+  // 已下线主题的旧值 → 收敛到当前可用的主题。用户 localStorage 里可能还留着旧键。
+  const THEME_ALIASES = {
+    shanchui: 'qingkong',              // 山吹 → 晴空蓝（改名）
+    shanyue: 'github',                 // 山月（已下线）
+    'condensed-night-purple': 'github', // 凝夜紫（已下线）
+  };
+  const THEMES = ['github', 'qingkong'];
+
+  function normalizeTheme(t) {
+    const v = THEME_ALIASES[t] || t;
+    return THEMES.includes(v) ? v : 'github';
+  }
+
   const state = {
-    theme: localStorage.getItem('mdtu-theme') || 'github',
+    theme: normalizeTheme(localStorage.getItem('mdtu-theme')),
     autoNumber: false,
     gridBg: false,
     syncScroll: true,
     currentTemplate: null,
     footnoteLinks: false,
+    // 预览设备档。这里只放默认值，存档值在 init() 里经校验后套用
+    // （DEVICE_IDS 是 const，此处还取不到）。
+    device: 'pc',
   };
 
   // ===== Elements =====
@@ -21,11 +37,16 @@
   const editor = $('#editor');
   const preview = $('#preview');
   const previewWrap = $('#previewWrap');
+  const previewScroll = $('#previewScroll');
   const themeSelect = $('#themeSelect');
+  const deviceBtns = document.querySelectorAll('#deviceGroup .seg-btn');
   const charCount = $('#charCount');
   const wordCount = $('#wordCount');
   const lineCount = $('#lineCount');
   const toast = $('#toast');
+
+  const escapeHtml = (s) =>
+    String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
   // ===== Watermark Config =====
   const WM_KEY = 'mdtu-watermark';
@@ -280,7 +301,10 @@ $$
         return code;
       }
     },
-    breaks: false,
+    // 单行换行渲染为 <br>（GFM 默认是折成空格）。
+    // 公众号排版场景下作者习惯一行一句，且本项目 F3 蓝本 doocs/md（同样基于 marked）
+    // 就是 breaks: true；折行会让「多行 `>` 引用」这类内容看起来丢了格式。
+    breaks: true,
     gfm: true,
     headerIds: true,
     headerPrefix: '',
@@ -301,9 +325,230 @@ $$
   }
   initMermaid();
 
+  // ===== Front Matter (文档元数据) =====
+  // 只认文件首行的 `---` … `---` 块；允许前置 BOM 与 CRLF
+  const FM_RE = /^\uFEFF?---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
+  // 块内至少要有一行 `key: value` 才算元数据，否则按正文处理（例如正文以 `---` 分割线开头）
+  // 允许 `key:` 后为空（YAML 块状数组 / 嵌套映射的写法，如 `tags:` 换行再跟 `- 甲`）
+  const FM_KV_RE = /^[ \t]*[^\s#][^:\n]*:[ \t]*(\S|$)/m;
+
+  const FM_KEY = 'mdtu-frontmatter';
+  const FM_MODES = ['panel', 'codeBlock', 'hide'];
+  const FM_MODE_LABELS = { panel: '属性', codeBlock: '源码', hide: '隐藏' };
+
+  // 与 style.css 中的 4 套主题平行维护。元数据面板一律输出内联样式，
+  // 这样即使公众号编辑器剥掉了 <style>，卡片与标签的观感也不会塌掉。
+  const FM_PALETTE = {
+    github: { panelBg: '#f6f8fa', border: '#d8dee4', divider: 'rgba(208,215,222,.7)', head: '#8c959f', key: '#57606a', text: '#24292f', icon: '#8c959f', muted: '#8c959f', accent: '#0969da', yes: '#1a7f37', tagBg: '#ddf4ff', tagText: '#0969da', preBg: '#ffffff', preText: '#24292f', preBorder: '#d8dee4' },
+    qingkong: { panelBg: '#eff4f8', border: '#dbe6ee', divider: 'rgba(180,200,215,.45)', head: '#93a6b3', key: '#5f7280', text: '#3f3f3f', icon: '#9ca3af', muted: '#9ca3af', accent: '#3d9fc7', yes: '#2f9e6a', tagBg: 'rgba(102,204,255,.16)', tagText: '#1f8fbf', preBg: '#2d2d2d', preText: '#f8f8f2', preBorder: 'transparent' },
+  };
+
+  // 键的类型图标（线条图标，跟随键文字取色）
+  const FM_ICON_PATHS = {
+    text: '<path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/>',
+    list: '<path d="M8 6h13M8 12h13M8 18h13"/><path d="M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
+    number: '<path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/>',
+    checkbox: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8.5 12.5l2.5 2.5 4.5-5"/>',
+    date: '<rect x="3" y="4.5" width="18" height="16.5" rx="2"/><path d="M8 2.5v4M16 2.5v4M3 10h18"/>',
+    datetime: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
+    tag: '<path d="M3 3h8l10 10-8 8L3 11z"/><path d="M7.5 7.5h.01"/>',
+    folder: '<path d="M3 7.5a2 2 0 0 1 2-2h3.4a2 2 0 0 1 1.45.62L11.2 7.5H19a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  };
+
+  let fmMode = (() => {
+    try {
+      const saved = localStorage.getItem(FM_KEY);
+      // F4 首版把这一档叫「表格」，旧值按新档名迁移
+      if (saved === 'table') return 'panel';
+      return FM_MODES.includes(saved) ? saved : 'panel';
+    } catch (e) {
+      return 'panel';
+    }
+  })();
+
+  // 最近一次渲染提取到的元数据，供字数统计 / 大纲 / 插入目录复用
+  let fmCurrent = { raw: null, data: null, body: '' };
+
+  // 元数据块占用的源码行数（没有元数据时为 0）
+  function fmBlockLineCount() {
+    return fmCurrent.raw ? fmCurrent.raw.split('\n').length + 2 : 0;
+  }
+
+  // 把源码切成「元数据块 + 正文」。必须在 marked.parse 之前调用，
+  // 否则 marked 会把首个 `---` 当分割线、收尾 `---` 当 setext 下划线，把元数据吞成 <h2>。
+  function splitFrontMatter(src) {
+    const text = String(src == null ? '' : src);
+    const none = { raw: null, data: null, body: text, broken: false };
+    if (!window.jsyaml) return none; // js-yaml 未加载：退回原行为，不影响正文渲染
+
+    const m = FM_RE.exec(text);
+    if (!m || !FM_KV_RE.test(m[1])) return none;
+
+    // 剥掉紧随闭合 `---` 的空行，让正文区间从真正的内容行开始
+    // （不影响渲染，但字数 / 行数统计不会多出一个空行）
+    const body = text.slice(m[0].length).replace(/^[\r\n]+/, '');
+    let data = null;
+    try {
+      // 必须显式用 CORE_SCHEMA：默认 schema 会把 `date: 2026-09-20` 解析成 Date 对象，
+      // 序列化后变成 2026-09-20T00:00:00.000Z，东八区会显示成前一天。
+      data = window.jsyaml.load(m[1], { schema: window.jsyaml.CORE_SCHEMA });
+    } catch (e) {
+      data = null;
+    }
+    // 语法错误或不是键值对象：依然剥离（正文里不该出现 hr + 假标题），原文按「源码」形态回显
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      return { raw: m[1], data: null, body, broken: true };
+    }
+    return { raw: m[1], data, body, broken: false };
+  }
+
+  // 非 Date 的对象或数组（即 YAML 里的映射与序列）
+  const fmIsAnyObj = (x) => x !== null && typeof x === 'object' && !(x instanceof Date);
+
+  // 「容器」= 有内容、且需要在面板里展开成多行的对象 / 数组。
+  // 标量数组（如 `tags: [a, b]`）不是容器——它仍在一行里渲染成标签胶囊。
+  function fmIsContainer(v) {
+    if (Array.isArray(v)) return v.length > 0 && v.some(fmIsAnyObj);
+    return fmIsAnyObj(v) && Object.keys(v).length > 0;
+  }
+
+  // 容器内共有多少个叶子属性。标题行的「n 项」用它，展开后能逐行对上。
+  function fmLeafCount(v) {
+    if (fmIsContainer(v)) {
+      if (Array.isArray(v)) return v.reduce((n, x) => n + fmLeafCount(x), 0);
+      return Object.keys(v).reduce((n, k) => n + fmLeafCount(v[k]), 0);
+    }
+    return 1;
+  }
+
+  // 值 → 纯文本：布尔用 ✓/✗，数组顿号连接，对象折叠为 key: value
+  function fmFormatValue(v) {
+    if (v === null || v === undefined) return '';
+    if (typeof v === 'boolean') return v ? '✓' : '✗';
+    if (v instanceof Date) {
+      // CORE_SCHEMA 下日期是字符串，这里只是兜底
+      return new Date(v.getTime() - v.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    }
+    if (Array.isArray(v)) return v.map((x) => fmFormatValue(x)).filter((s) => s !== '').join('、');
+    if (typeof v === 'object') return Object.keys(v).map((k) => `${k}: ${fmFormatValue(v[k])}`).join('、');
+    return String(v);
+  }
+
+  // 推断键的类型，决定左侧图标（与 Obsidian 的 Properties 一致：图标表达类型）
+  function fmTypeOf(key, v) {
+    const k = String(key).toLowerCase();
+    if (k === 'tags' || k === 'keywords' || k === 'categories') return 'tag';
+    if (Array.isArray(v)) return 'list';
+    if (typeof v === 'boolean') return 'checkbox';
+    if (typeof v === 'number') return 'number';
+    if (fmIsAnyObj(v)) return 'folder'; // 走到这里的只剩空对象，非空对象由容器行渲染
+    const s = String(v == null ? '' : v).trim();
+    if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(s)) return 'datetime';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return 'date';
+    return 'text';
+  }
+
+  function fmIcon(type, pal) {
+    const d = FM_ICON_PATHS[type] || FM_ICON_PATHS.text;
+    return `<svg class="fm-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display:block;flex:0 0 auto;color:${pal.icon};">${d}</svg>`;
+  }
+
+  // 标签胶囊：Obsidian 用主题色半透明底 + 主题色文字
+  function fmChip(text, pal) {
+    return `<span class="fm-tag" style="display:inline-block;margin:1px 5px 1px 0;padding:1px 9px;border-radius:999px;background:${pal.tagBg};color:${pal.tagText};font-size:12px;line-height:1.7;white-space:nowrap;">${escapeHtml(text)}</span>`;
+  }
+
+  // 值 → HTML：数组渲染成标签胶囊，布尔带色；type 用于把单值 tags 也渲染成胶囊
+  function fmRenderValue(v, pal, type) {
+    if (Array.isArray(v)) {
+      if (!v.length) return `<span style="color:${pal.muted};">—</span>`;
+      return v.map((item) => fmChip(fmFormatValue(item), pal)).join('');
+    }
+    if (fmIsAnyObj(v)) return `<span style="color:${pal.muted};">—</span>`; // 空对象
+    if (typeof v === 'boolean') {
+      return `<span style="color:${v ? pal.yes : pal.muted};font-weight:600;">${v ? '✓' : '✗'}</span>`;
+    }
+    if (type === 'tag' && String(v == null ? '' : v).trim() !== '') return fmChip(String(v), pal);
+    return escapeHtml(fmFormatValue(v)).replace(/\n/g, '<br>');
+  }
+
+  // 递归渲染「键 + 值」：容器（对象 / 含对象的数组）展开成「容器行 + 缩进子级」，
+  // 叶子仍是一行。层级用左边框竖线表达，缩进与线条全部内联，复制到公众号不丢。
+  function fmRenderNode(name, value, pal, withDivider) {
+    const sep = withDivider ? `border-top:1px solid ${pal.divider};` : '';
+    const rowStyle = `display:flex;align-items:flex-start;padding:5px 0;${sep}`;
+    const keyStyle = `display:flex;align-items:center;flex:0 0 34%;min-width:88px;max-width:190px;padding-right:12px;font-size:13px;line-height:1.6;color:${pal.key};`;
+    const cell = (icon, text) =>
+      `<div class="fm-key" style="${keyStyle}">${icon}` +
+      `<span class="fm-key-text" style="margin-left:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${text}</span></div>`;
+
+    if (fmIsContainer(value)) {
+      const isArr = Array.isArray(value);
+      const kids = isArr ? value.map((v, i) => [`[${i}]`, v]) : Object.entries(value);
+      const children = kids.map(([k, v], i) => fmRenderNode(k, v, pal, i > 0)).join('');
+      return `<div class="fm-row fm-row-group" style="${rowStyle}">` +
+        cell(fmIcon(isArr ? 'list' : 'folder', pal), escapeHtml(name)) +
+        `<div class="fm-val fm-count" style="flex:1 1 auto;min-width:0;font-size:12px;line-height:1.75;color:${pal.muted};">${kids.length} 项</div>` +
+        `</div>` +
+        `<div class="fm-children" style="margin:0 0 2px 7px;padding-left:13px;border-left:1px solid ${pal.divider};">${children}</div>`;
+    }
+
+    const type = fmTypeOf(name, value);
+    return `<div class="fm-row" style="${rowStyle}">` +
+      cell(fmIcon(type, pal), escapeHtml(name)) +
+      `<div class="fm-val" style="flex:1 1 auto;min-width:0;font-size:14px;line-height:1.6;color:${pal.text};word-break:break-word;">${fmRenderValue(value, pal, type)}</div>` +
+      `</div>`;
+  }
+
+  // Obsidian 风格：正文之前一块「属性」面板 —— 圆角卡片 + 每行「类型图标 + 键 + 值」，
+  // 数组值渲染成标签胶囊。嵌套对象 / 数组递归展开，因此每个叶子属性都独占一行。
+  // 面板内不含 <h*>，所以不会被自动编号，也不会混进大纲。
+  function buildFrontMatterBlock(fm) {
+    if (!fm.raw || fmMode === 'hide') return '';
+
+    const pal = FM_PALETTE[state.theme] || FM_PALETTE.github;
+    const wrap = `margin:0 0 24px;padding:6px 12px 8px;border:1px solid ${pal.border};border-radius:8px;background:${pal.panelBg};`;
+
+    // 源码形态：用户切到「源码」档，或 YAML 解析失败时的回退
+    if (fmMode === 'codeBlock' || !fm.data) {
+      const warn = fm.data
+        ? ''
+        : `<div class="fm-warn" style="margin:6px 0 8px;font-size:12px;color:${pal.muted};">元数据解析失败，已按原文展示</div>`;
+      return (
+        `<section class="fm-block" data-fm="code" style="${wrap}">` + warn +
+        `<pre class="fm-pre" style="margin:0;padding:10px 12px;overflow:auto;border:1px solid ${pal.preBorder};border-radius:6px;background:${pal.preBg};color:${pal.preText};">` +
+        `<code style="font-family:Consolas,Monaco,'Courier New',monospace;font-size:13px;line-height:1.55;white-space:pre;">${escapeHtml(fm.raw)}</code>` +
+        `</pre></section>`
+      );
+    }
+
+    const keys = Object.keys(fm.data);
+    // 计数按叶子属性算：顶层可能只有 2 个键，展开后却有 8 行，数字要能逐行对上
+    const leaves = keys.reduce((n, k) => n + fmLeafCount(fm.data[k]), 0);
+
+    // 标题行是应用 UI（不是文章内容），复制到公众号时由 copyToClipboard() 摘掉
+    const head =
+      `<div class="fm-head" data-fm-ui="1" style="padding:2px 0 6px;border-bottom:1px solid ${pal.divider};font-size:12px;line-height:1.6;color:${pal.head};user-select:none;">` +
+      `属性<span style="margin-left:6px;">${leaves} 项</span></div>`;
+
+    const rows = keys.map((k, i) => fmRenderNode(k, fm.data[k], pal, i > 0)).join('');
+
+    return `<section class="fm-block" data-fm="panel" style="${wrap}">${head}<div class="fm-body">${rows}</div></section>`;
+  }
+
+  // 元数据存在时才露出「元数据」档位控件，避免没有元数据的文档多一排无用 UI
+  function updateFmModeControl(fm) {
+    const group = $('#fmModeGroup');
+    if (!group) return;
+    group.style.display = fm.raw ? '' : 'none';
+  }
+
   // ===== Render Function =====
   function renderMarkdown() {
-    const md = editor.value;
+    // 先剥掉文档首部的元数据，再交给 marked
+    const fm = splitFrontMatter(editor.value);
+    fmCurrent = fm;
+    const md = fm.body;
 
     // Reset footnote state
     footnoteCounter = 0;
@@ -317,6 +562,9 @@ $$
       ADD_TAGS: ['sup', 'sub', 'span', 'div', 'figcaption', 'figure'],
       ADD_ATTR: ['class', 'style', 'data-id', 'id', 'href', 'src', 'alt', 'title', 'target', 'rel', 'colspan', 'rowspan', 'align', 'width', 'height'],
     });
+
+    // 元数据块拼在正文之前（自己生成的标记，已转义，不经过 marked / DOMPurify）
+    html = buildFrontMatterBlock(fm) + html;
 
     // Apply auto numbering
     if (state.autoNumber) {
@@ -343,6 +591,9 @@ $$
 
     // Update counts
     updateCounts();
+
+    // Update the metadata mode control (only shown when there is metadata)
+    updateFmModeControl(fm);
 
     // Update outline if visible
     updateOutline();
@@ -378,8 +629,27 @@ $$
     });
   }
 
+  // 块级公式的多行写法必须先在 DOM 上「合回一个文本节点」，否则 KaTeX 渲染不到。
+  //
+  // breaks: true 会把段落内的换行变成 <br>，于是
+  //     $$
+  //     \int_0^\infty e^{-x^2} dx = \frac{\sqrt{\pi}}{2}
+  //     $$
+  // 被渲染成 `<p>$$<br>\int…<br>$$</p>`。KaTeX 的 auto-render 是按文本节点匹配
+  // 定界符的，`$$` 被 <br> 拆到不同文本节点后就再也配不上，**整个块级公式不渲染**
+  // （行内 `$x$` 不受影响，因为它在单个文本节点里）。
+  // 这里把「整段就是一个块级公式」的段落里的 <br> 还原成换行，交给 KaTeX 正常处理。
+  function unfoldDisplayMath() {
+    const isWholeBlock = (s) => /^\$\$[\s\S]+\$\$$/.test(s) || /^\\\[[\s\S]+\\\]$/.test(s);
+    preview.querySelectorAll('p').forEach((p) => {
+      if (!isWholeBlock(p.textContent.trim())) return;
+      p.querySelectorAll('br').forEach((br) => br.replaceWith('\n'));
+    });
+  }
+
   // ===== Math Rendering =====
   function renderMath() {
+    unfoldDisplayMath();
     if (!window.renderMathInElement) return;
     try {
       renderMathInElement(preview, {
@@ -412,7 +682,11 @@ $$
   // ===== TOC Generation =====
   function generateTOC() {
     const md = editor.value;
-    const lines = md.split('\n');
+    // 元数据必须留在文件最顶部：目录只在正文区间内查找与插入
+    const fm = splitFrontMatter(md);
+    const head = fm.raw ? md.slice(0, md.length - fm.body.length) : '';
+    let body = fm.body;
+    const lines = body.split('\n');
     const tocLines = ['<!-- TOC -->', ''];
     let inCodeBlock = false;
 
@@ -435,25 +709,37 @@ $$
     tocLines.push('', '<!-- /TOC -->');
 
     // Check if TOC already exists
-    const currentMd = editor.value;
     const tocRegex = /<!-- TOC -->[\s\S]*?<!-- \/TOC -->/;
-    if (tocRegex.test(currentMd)) {
-      editor.value = currentMd.replace(tocRegex, tocLines.join('\n'));
+    if (tocRegex.test(body)) {
+      body = body.replace(tocRegex, tocLines.join('\n'));
     } else {
-      // Insert at the beginning
-      editor.value = tocLines.join('\n') + '\n\n' + currentMd;
+      // Insert at the top of the body (right after the metadata block)
+      body = tocLines.join('\n') + '\n\n' + body;
     }
+    editor.value = head + body;
     renderMarkdown();
     showToast('目录已插入');
   }
 
   // ===== Update Counts =====
   function updateCounts() {
-    const text = editor.value;
+    // 元数据块不计入统计，否则数字会和剪贴板里的正文对不上
+    const text = fmCurrent.raw ? fmCurrent.body : editor.value;
     charCount.textContent = `${text.length} 字符`;
     const words = text.trim().split(/\s+/).filter(w => w.length > 0).length;
     wordCount.textContent = `${words} 词`;
     lineCount.textContent = `${text.split('\n').length} 行`;
+
+    const metaCount = $('#metaCount');
+    if (metaCount) {
+      metaCount.style.display = fmCurrent.raw ? '' : 'none';
+      if (fmCurrent.raw) {
+        // 与面板标题行口径一致：按叶子属性数，而不是顶层键数
+        metaCount.textContent = fmCurrent.data
+          ? `元数据 ${Object.keys(fmCurrent.data).reduce((n, k) => n + fmLeafCount(fmCurrent.data[k]), 0)} 项（未计入）`
+          : '元数据未计入';
+      }
+    }
   }
 
   // ===== Editor Toolbar Actions =====
@@ -563,17 +849,100 @@ $$
   }
 
   // ===== Theme Switching =====
+  // 预览容器的 class 由「主题 + 方格背景 + 设备档」共同决定。
+  // 统一从这里拼装：任何一处直接写 `preview.className = ...` 都会把其余几维冲掉。
+  function syncPreviewClass() {
+    preview.className = [
+      'markdown-body',
+      'theme-' + state.theme,
+      state.gridBg ? 'grid-bg' : '',
+      'device-' + state.device,
+    ].filter(Boolean).join(' ');
+  }
+
   function applyTheme(theme) {
-    state.theme = theme;
-    localStorage.setItem('mdtu-theme', theme);
-    preview.className = `markdown-body theme-${theme}${state.gridBg ? ' grid-bg' : ''}`;
-    themeSelect.value = theme;
+    state.theme = normalizeTheme(theme);
+    localStorage.setItem('mdtu-theme', state.theme);
+    syncPreviewClass();
+    themeSelect.value = state.theme;
+    // 元数据块用的是内联样式（按主题取色），换主题后必须重渲染才能跟着变色
+    renderMarkdown();
+  }
+
+  // ===== Preview Mode: 设备端 =====
+  // 只影响「预览怎么看」，不参与复制 / 导出产物 ——
+  // 模拟出来的版心与字号是观察工具，写进产物会把真实排版带偏。
+  // 只有设备一个维度：每档隐含「这个尺寸下最典型的阅读场景」，平台规则直接内建在档位里
+  // （见 style.css 的 `.device-*` 段）：
+  //   pc   → 浏览器实际宽度，Web 排版（主题原貌）
+  //   ipad → 视口 768px，Web 排版 + 平板适配
+  //   app  → 视口 375px，公众号排版
+  // 档位在工具栏上全部平铺，点一下就切（不用 <select>）。
+  const DEVICE_IDS = ['pc', 'ipad', 'app'];
+
+  function pickSaved(key, ids, fallback) {
+    try {
+      const v = localStorage.getItem(key);
+      return ids.includes(v) ? v : fallback;
+    } catch (e) {
+      return fallback;
+    }
+  }
+
+  // 把按钮组的选中态对齐到当前值（.active + aria-pressed，供读屏与样式共用）
+  function syncSegBtns(btns, active, dataKey) {
+    btns.forEach((b) => {
+      const on = b.dataset[dataKey] === active;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+  }
+
+  // 切换是「即时可见」的操作：档位激活态一换，预览就跟着变，不需要再弹 Toast
+  // 解释一遍 —— 提示浮层会挡住正文，停留 2.5s 反而打断观察。
+  function applyDevice(device) {
+    state.device = DEVICE_IDS.includes(device) ? device : 'pc';
+    localStorage.setItem('mdtu-device', state.device);
+    syncPreviewClass();
+    // PC 是「不套壳」的基准态；另两档把版心外的底衬压深，设备边界才看得出来
+    previewScroll.classList.toggle('device-frame', state.device !== 'pc');
+    syncSegBtns(deviceBtns, state.device, 'device');
   }
 
   // ===== Copy to Clipboard (Rich Text) =====
+
+  // 剥掉「只对编辑界面有意义」的属性：这份文件一旦托管成资料库页面，页面编辑器会给每个
+  // 节点打上 data-page-node-id（pnid），用于节点级评论与「划词让 AI 改」的定位。
+  // 那是编辑器的事，不能跟着正文进公众号，也不该出现在导出的 HTML / Word 里。
+  // 源码里这类属性已全部清空（2026-10-13，312 处），本段留作防御 —— 文件若再被托管回去，
+  // 属性会重新出现，不拦就会跟着克隆漏进产物。
+  function stripEditorOnlyAttrs(root) {
+    if (!root) return root;
+    if (root.removeAttribute) root.removeAttribute('data-page-node-id');
+    if (root.querySelectorAll) {
+      root.querySelectorAll('[data-page-node-id]')
+        .forEach((el) => el.removeAttribute('data-page-node-id'));
+    }
+    return root;
+  }
+
+  // 预览模式类（device-*）是**观察工具**，不属于文章内容：
+  // 复制与导出前一律摘掉，否则模拟出来的版心 / 字号会被当成真实排版带进产物。
+  function stripPreviewModeClasses(root) {
+    if (!root || !root.classList) return root;
+    const drop = [];
+    root.classList.forEach((c) => {
+      if (/^device-/.test(c)) drop.push(c);
+    });
+    drop.forEach((c) => root.classList.remove(c));
+    return root;
+  }
+
   function copyToClipboard() {
     // Clone the preview for copying
-    const clone = preview.cloneNode(true);
+    const clone = stripPreviewModeClasses(stripEditorOnlyAttrs(preview.cloneNode(true)));
+    // 元数据面板的「属性 n 项」标题行是应用 UI，不属于文章内容，复制时摘掉
+    clone.querySelectorAll('[data-fm-ui]').forEach((el) => el.remove());
     // The CSS background (SVG data URI) is usually stripped by the WeChat editor,
     // so for the copy we always rebuild the watermark as real DOM nodes below.
     clone.style.backgroundImage = '';
@@ -626,19 +995,8 @@ $$
   }
 
   function fallbackCopy(text) {
-    const textarea = document.createElement('textarea');
-    textarea.value = text;
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    document.body.appendChild(textarea);
-    textarea.select();
-    try {
-      document.execCommand('copy');
-      showToast('已复制 HTML 到剪贴板', 'success');
-    } catch (err) {
-      showToast('复制失败', 'error');
-    }
-    document.body.removeChild(textarea);
+    if (copyTextFallback(text)) showToast('已复制 HTML 到剪贴板', 'success');
+    else showToast('复制失败', 'error');
   }
 
   function getThemeStyles(theme) {
@@ -652,12 +1010,15 @@ $$
         code { font-size: 85%; padding: .2em .4em; background: rgba(175,184,193,.2); border-radius: 6px; font-family: Consolas, monospace; }
         pre { padding: 16px; overflow: auto; border-radius: 6px; background: #f6f8fa; }
         pre code { padding: 0; background: none; }
-        blockquote { padding: 0 16px; color: #57606a; border-left: .25em solid #d0d7de; margin: 0 0 16px; }
+        blockquote { padding: 0 16px; border-left: .25em solid #d0d7de; margin: 0 0 16px; }
+        blockquote p, blockquote li { color: #57606a; }
+        blockquote > :first-child { margin-top: 0; }
+        blockquote > :last-child { margin-bottom: 0; }
         table { border-collapse: collapse; }
         table th, table td { padding: 6px 13px; border: 1px solid #d0d7de; }
         table th { background: #f6f8fa; font-weight: 600; }
         table tr:nth-child(2n) { background: #f6f8fa; }`,
-      shanchui: `body, div { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 16px; line-height: 1.8; color: #3f3f3f; }
+      qingkong: `body, div { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 16px; line-height: 1.8; color: #3f3f3f; }
         h1 { font-size: 1.8em; font-weight: bold; text-align: center; color: #66CCFF; border-bottom: 2px solid #66CCFF; padding-bottom: 10px; }
         h2 { font-size: 1.4em; font-weight: bold; color: #66CCFF; border-left: 5px solid #66CCFF; padding-left: 12px; margin: 30px 0 16px; }
         h3 { font-size: 1.2em; font-weight: bold; color: #555; }
@@ -666,38 +1027,307 @@ $$
         code { font-size: 90%; padding: 2px 6px; background: rgba(102,204,255,.12); color: #e83e8c; border-radius: 3px; font-family: Consolas, monospace; }
         pre { padding: 16px; border-radius: 4px; background: #2d2d2d; }
         pre code { padding: 0; background: none; color: #f8f8f2; }
-        blockquote { padding: 10px 16px; background: rgba(102,204,255,.08); border-left: 4px solid #66CCFF; color: #666; }
+        blockquote { padding: 10px 16px; background: rgba(102,204,255,.08); border-left: 4px solid #66CCFF; }
+        blockquote p, blockquote li { color: #666; }
+        blockquote > :first-child { margin-top: 0; }
+        blockquote > :last-child { margin-bottom: 0; }
         table { border-collapse: collapse; }
         table th, table td { padding: 8px 12px; border: 1px solid #e0e0e0; }
         table th { background: rgba(102,204,255,.1); }`,
-      shanyue: `body, div { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 16px; line-height: 1.75; color: #2c3e50; }
-        h1 { font-size: 1.7em; font-weight: 700; color: #1a1a1a; text-align: center; }
-        h2 { font-size: 1.35em; font-weight: 700; color: #1a1a1a; border-bottom: 1px solid #eee; padding-bottom: 8px; margin: 30px 0 14px; }
-        h3 { font-size: 1.15em; font-weight: 600; color: #333; }
-        p { margin: 0 0 14px; }
-        a { color: #42b983; text-decoration: none; }
-        code { font-size: 90%; padding: 2px 6px; background: #f0f0f0; color: #d63200; border-radius: 3px; font-family: Consolas, monospace; }
-        pre { padding: 14px 16px; border-radius: 4px; background: #282c34; }
-        pre code { padding: 0; background: none; color: #abb2bf; }
-        blockquote { padding: 10px 16px; background: #f8f8f8; border-left: 4px solid #42b983; color: #666; }
-        table { border-collapse: collapse; }
-        table th, table td { padding: 8px 12px; border: 1px solid #e8e8e8; }
-        table th { background: #42b983; color: #fff; }`,
-      'condensed-night-purple': `body, div { font-family: "PingFang SC", "Microsoft YaHei", sans-serif; font-size: 16px; line-height: 1.75; color: #ddd6fe; background: #2d2d2d; }
-        h1 { font-size: 1.8em; font-weight: bold; color: #a78bfa; text-align: center; border-bottom: 2px solid #4c1d95; padding-bottom: 10px; }
-        h2 { font-size: 1.4em; font-weight: bold; color: #c4b5fd; border-left: 5px solid #7c3aed; padding-left: 12px; margin: 30px 0 16px; }
-        h3 { font-size: 1.2em; font-weight: bold; color: #c4b5fd; }
-        p { margin: 0 0 16px; }
-        a { color: #a78bfa; text-decoration: none; border-bottom: 1px solid #7c3aed; }
-        code { font-size: 90%; padding: 2px 6px; background: rgba(167,139,250,.2); color: #f0abfc; border-radius: 3px; font-family: Consolas, monospace; }
-        pre { padding: 16px; border-radius: 4px; background: #1e1e2e; }
-        pre code { padding: 0; background: none; color: #f0abfc; }
-        blockquote { padding: 10px 16px; background: rgba(124,58,237,.15); border-left: 4px solid #7c3aed; color: #c4b5fd; }
-        table { border-collapse: collapse; }
-        table th, table td { padding: 8px 12px; border: 1px solid #4c1d95; }
-        table th { background: rgba(124,58,237,.3); }`,
     };
     return styles[theme] || styles.github;
+  }
+
+  // ===== Export (F1) =====
+  // 四个出口：复制 Markdown 源码 / 导出 HTML / 导出 PDF / 导出 Word。
+  // 全部走浏览器本地下载（Blob + ObjectURL + <a download>），不经过任何服务端。
+
+  // 独立 HTML 文档的外壳样式。
+  // ⚠️ 这一段必须排在「主题样式」**之前**：主题样式会在 `body, div` 上声明
+  // 背景 / 文字色，外壳样式（`body { margin: 0; padding: 24px 16px }` 等）若排在后面，
+  // 会把主题的背景顶掉（深色文档变白底浅字）。
+  const EXPORT_PAGE_CSS = `*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; padding: 24px 16px; }
+.markdown-body { width: 100%; max-width: 820px; margin: 0 auto; padding: 40px; border-radius: 8px; box-shadow: 0 0 1px rgba(0,0,0,.08); }
+.markdown-body img { max-width: 100%; }
+@page { margin: 16mm; }
+@media print {
+  body { margin: 0; padding: 0; }
+  .markdown-body { max-width: none; padding: 0; border-radius: 0; box-shadow: none; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  pre, blockquote, table, .mermaid-rendered, .katex-display, .fm-block { break-inside: avoid; }
+  h1, h2, h3, h4, h5, h6 { break-after: avoid; }
+}`;
+
+  // Word 的 HTML 引擎只认一小撮 CSS，且不认 em 单位。
+  // 主题样式跑在前面，这里用 pt 把标题字号、表格边框、代码块兜底回来。
+  const WORD_COMPAT_CSS = `html, body { font-size: 12pt; }
+h1 { font-size: 20pt; } h2 { font-size: 16pt; } h3 { font-size: 14pt; } h4, h5, h6 { font-size: 12pt; }
+p { margin: 0 0 8pt; }
+table { border-collapse: collapse; width: 100%; }
+table th, table td { border: 1px solid #999999; padding: 4pt 6pt; }
+pre { white-space: pre-wrap; word-wrap: break-word; font-family: Consolas, "Courier New", monospace; font-size: 10pt; padding: 8pt; }
+code { font-family: Consolas, "Courier New", monospace; }
+blockquote { margin: 0 0 8pt; padding: 4pt 10pt; }
+ul, ol { margin: 0 0 8pt; padding-left: 22pt; }
+img { max-width: 100%; }`;
+
+  // 文档标题：正文里第一个 H1 → 元数据的 title → 空
+  function docTitleText() {
+    const body = fmCurrent && fmCurrent.body ? fmCurrent.body : editor.value;
+    const m = /^\s{0,3}#[ \t]+(.+?)[ \t]*#*[ \t]*$/m.exec(body || '');
+    let title = m ? m[1].trim() : '';
+    if (!title && fmCurrent && fmCurrent.data && fmCurrent.data.title != null) {
+      title = String(fmCurrent.data.title).trim();
+    }
+    return title;
+  }
+
+  // 文件名清洗：剥 Markdown 标记与各系统的非法字符，截断到 80 字符
+  function sanitizeFileName(name) {
+    const out = String(name == null ? '' : name)
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1') // [文字](链接) → 文字
+      .replace(/[*_`~]/g, '')                  // 强调 / 行内代码标记
+      .replace(/[\\/:*?"<>|]/g, '')            // Windows 非法字符
+      .replace(/[\u0000-\u001f]/g, '')         // 控制字符
+      .replace(/\s+/g, ' ')
+      .replace(/^[.\s]+|[.\s]+$/g, '')         // 首尾的点与空白
+      .slice(0, 80)
+      .trim();
+    return out || 'document';
+  }
+
+  function getDocBaseName() {
+    return sanitizeFileName(docTitleText() || 'document');
+  }
+
+  // 克隆预览内容，并剥掉只对编辑界面有意义的东西：
+  // 页宽 max-width / 预览用的水印背景（导出时另挂）/ id / 方格背景
+  function clonePreviewForExport() {
+    const clone = stripPreviewModeClasses(stripEditorOnlyAttrs(preview.cloneNode(true)));
+    clone.removeAttribute('id');
+    clone.removeAttribute('style');
+    clone.classList.remove('grid-bg');
+    return clone;
+  }
+
+  // 取 CDN 样式表的文本。
+  // 顺序：① 同源样式表直接读 CSSOM（不需要网络）→ ② 网络抓取（CDN 带 CORS 头）
+  // 两者都失败时返回 null，调用方会退化成保留 <link> 标签。
+  const exportCssCache = new Map();
+  async function readCssText(href) {
+    if (exportCssCache.has(href)) return exportCssCache.get(href);
+    let text = null;
+
+    // ① CSSOM：跨域样式表读 cssRules 会抛 SecurityError，落到 ②
+    try {
+      const sheet = Array.from(document.styleSheets).find((s) => s.href === href);
+      if (sheet && sheet.cssRules) {
+        text = Array.from(sheet.cssRules).map((r) => r.cssText).join('\n');
+      }
+    } catch (e) { /* 跨域 → 走网络 */ }
+
+    // ② 网络
+    if (!text) {
+      try {
+        const res = await fetch(href, { mode: 'cors' });
+        if (res.ok) text = await res.text();
+      } catch (e) { /* 离线 / 被拦 → 保持 null */ }
+    }
+
+    exportCssCache.set(href, text);
+    return text;
+  }
+
+  // 把 CSS 里的相对 url() 变绝对。
+  // 关键在 KaTeX：它的 @font-face 写的是 `url(fonts/KaTeX_*.woff2)`，
+  // 内联进导出文件后相对路径会指向导出文件所在目录，字体全部 404。
+  function absolutizeCssUrls(css, baseHref) {
+    return String(css).replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/gi, (whole, quote, url) => {
+      if (/^(data:|https?:|\/\/|#)/i.test(url)) return whole;
+      let abs;
+      try { abs = new URL(url, baseHref).href; } catch (e) { return whole; }
+      return 'url("' + abs + '")';
+    });
+  }
+
+  async function collectExportCss() {
+    const links = Array.from(document.querySelectorAll('link[data-export-css]'));
+    const inlined = [];
+    const fallback = [];
+    for (const link of links) {
+      const href = link.href;
+      const raw = await readCssText(href);
+      if (raw) inlined.push(absolutizeCssUrls(raw, href));
+      else fallback.push(href);
+    }
+    return { inlined, fallback };
+  }
+
+  // 预览里的水印是挂在元素 background-image 上的 data URI，
+  // 导出时改挂到文档容器，保持「所见即所得」且文件自包含。
+  function exportWatermarkCss() {
+    if (!isWatermarkActive(watermark)) return '';
+    return '.markdown-body { background-image: ' + buildWatermarkUrl(watermark) + '; background-repeat: repeat; }';
+  }
+
+  // 元数据原文以注释形式留在导出文件里，方便二次编辑（F4 规划里预留的这条）
+  function exportFrontMatterComment() {
+    if (!fmCurrent.raw) return '';
+    return '<!--\n' + String(fmCurrent.raw).replace(/-->/g, '-- >') + '\n-->\n';
+  }
+
+  async function buildStandaloneHtml() {
+    const { inlined, fallback } = await collectExportCss();
+    const title = docTitleText() || 'Markdown 文档';
+    const linkTags = fallback.map((h) => '<link rel="stylesheet" href="' + escapeHtml(h) + '">').join('\n');
+
+    return '<!DOCTYPE html>\n' +
+      '<html lang="zh-CN">\n<head>\n' +
+      '<meta charset="UTF-8">\n' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1.0">\n' +
+      '<title>' + escapeHtml(title) + '</title>\n' +
+      exportFrontMatterComment() +
+      '<style>\n' + EXPORT_PAGE_CSS + '\n</style>\n' +
+      '<style>\n' + getThemeStyles(state.theme) + '\n</style>\n' +
+      (inlined.length ? '<style>\n' + inlined.join('\n') + '\n</style>\n' : '') +
+      (linkTags ? linkTags + '\n' : '') +
+      '<style>\n' + exportWatermarkCss() + '\n</style>\n' +
+      '</head>\n<body>\n' +
+      clonePreviewForExport().outerHTML + '\n' +
+      '</body>\n</html>\n';
+  }
+
+  // Word 导出的固有限制：Word 不认 flex。元数据面板整块是 flex 行，
+  // 直接导会让「键 / 值」竖着堆成两行。这里把它降级成两列表格。
+  function fmPanelToTable(root) {
+    root.querySelectorAll('.fm-block[data-fm="panel"]').forEach((block) => {
+      const body = block.querySelector('.fm-body');
+      if (!body) return;
+      const rows = [];
+      const walk = (el, depth) => {
+        Array.from(el.children).forEach((child) => {
+          if (child.classList.contains('fm-row')) {
+            const keyEl = child.querySelector('.fm-key-text');
+            const valEl = child.querySelector('.fm-val');
+            let value = '';
+            if (valEl) {
+              const chips = valEl.querySelectorAll('.fm-tag');
+              value = chips.length
+                ? Array.from(chips).map((c) => c.textContent).join('、')
+                : valEl.textContent;
+            }
+            rows.push(
+              '<tr>' +
+              '<td style="border:1px solid #999999;padding:4pt 6pt;width:30%;' + (depth ? 'padding-left:' + (6 + depth * 12) + 'pt;' : '') + '">' +
+              escapeHtml((keyEl ? keyEl.textContent : '').trim()) + '</td>' +
+              '<td style="border:1px solid #999999;padding:4pt 6pt;">' +
+              escapeHtml(value.trim()) + '</td>' +
+              '</tr>'
+            );
+          } else if (child.classList.contains('fm-children')) {
+            walk(child, depth + 1);
+          }
+        });
+      };
+      walk(body, 0);
+      const table = document.createElement('table');
+      table.setAttribute('style', 'width:100%;border-collapse:collapse;margin:0 0 12pt;');
+      table.innerHTML = rows.join('');
+      block.replaceWith(table);
+    });
+  }
+
+  function buildWordHtml() {
+    const clone = clonePreviewForExport();
+    fmPanelToTable(clone);
+    const title = docTitleText() || 'Markdown 文档';
+
+    // 以 application/msword 输出 .doc。MSO 头让 Word / WPS 走「打印视图」，
+    // 配合 @page WordSection1 控制纸张与页边距。
+    return '<html xmlns:o="urn:schemas-microsoft-com:office:office" ' +
+      'xmlns:w="urn:schemas-microsoft-com:office:word" ' +
+      'xmlns="http://www.w3.org/TR/REC-html40">\n<head>\n' +
+      '<meta charset="UTF-8">\n' +
+      '<title>' + escapeHtml(title) + '</title>\n' +
+      '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View>' +
+      '<w:Zoom>100</w:Zoom><w:DoNotOptimizeForBrowser/></w:WordDocument></xml><![endif]-->\n' +
+      '<style>\n@page WordSection1 { size: A4; margin: 2cm; }\ndiv.WordSection1 { page: WordSection1; }\n' +
+      getThemeStyles(state.theme) + '\n' + WORD_COMPAT_CSS + '\n</style>\n' +
+      '</head>\n<body>\n<div class="WordSection1">\n' +
+      clone.outerHTML + '\n</div>\n</body>\n</html>\n';
+  }
+
+  // 统一的本地下载出口
+  function downloadBlob(content, filename, mime) {
+    const blob = content instanceof Blob ? content : new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // 立刻 revoke 会让部分浏览器的下载中断，留一点缓冲
+    setTimeout(() => { try { URL.revokeObjectURL(url); } catch (e) {} }, 5000);
+  }
+
+  // 复制 Markdown 源码。Clipboard API 需要安全上下文 + 用户手势，
+  // file:// 下虽然也是安全上下文，但仍可能因权限策略失败 → 保留 execCommand 降级。
+  function copyTextFallback(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:-9999px;opacity:0;';
+    document.body.appendChild(ta);
+    let ok = false;
+    try {
+      ta.select();
+      ok = document.execCommand('copy');
+    } catch (e) {
+      ok = false;
+    }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  async function exportCopyMarkdown() {
+    let ok = false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(editor.value);
+        ok = true;
+      }
+    } catch (e) {
+      ok = false;
+    }
+    if (!ok) ok = copyTextFallback(editor.value);
+    showToast(ok ? '已复制 Markdown 源码' : '复制失败，请手动选择复制', ok ? 'success' : 'error');
+    return ok;
+  }
+
+  function exportPdf() {
+    showToast('在打印对话框里选择「目标 → 另存为 PDF」');
+    // 等一帧，确保刚触发的重渲染（如 Mermaid 异步出图）已经落到 DOM 上
+    setTimeout(() => window.print(), 60);
+  }
+
+  async function runExport(kind) {
+    if (kind === 'md') return exportCopyMarkdown();
+    if (kind === 'pdf') return exportPdf();
+    try {
+      if (kind === 'html') {
+        const html = await buildStandaloneHtml();
+        downloadBlob(html, getDocBaseName() + '.html', 'text/html;charset=utf-8');
+        showToast('已导出 HTML', 'success');
+      } else if (kind === 'word') {
+        downloadBlob(buildWordHtml(), getDocBaseName() + '.doc', 'application/msword');
+        showToast('已导出 Word（.doc，HTML 套壳）', 'success');
+      }
+    } catch (err) {
+      showToast('导出失败：' + ((err && err.message) || err), 'error');
+    }
   }
 
   // ===== Toast =====
@@ -785,6 +1415,16 @@ $$
   // Theme select
   themeSelect.addEventListener('change', (e) => applyTheme(e.target.value));
 
+  // Metadata (Front Matter) display mode — table / codeBlock / hide
+  const fmModeSelect = $('#fmModeSelect');
+  fmModeSelect.value = fmMode;
+  fmModeSelect.addEventListener('change', (e) => {
+    fmMode = FM_MODES.includes(e.target.value) ? e.target.value : 'table';
+    try { localStorage.setItem(FM_KEY, fmMode); } catch (err) {}
+    renderMarkdown();
+    showToast('元数据展示方式：' + FM_MODE_LABELS[fmMode]);
+  });
+
   // Auto numbering
   $('#btnAutoNumber').addEventListener('click', () => {
     state.autoNumber = !state.autoNumber;
@@ -800,7 +1440,7 @@ $$
   $('#btnGridBg').addEventListener('click', () => {
     state.gridBg = !state.gridBg;
     $('#btnGridBg').classList.toggle('active', state.gridBg);
-    preview.classList.toggle('grid-bg', state.gridBg);
+    syncPreviewClass();
     showToast(state.gridBg ? '方格背景已开启' : '方格背景已关闭');
   });
 
@@ -814,6 +1454,37 @@ $$
 
   // Copy
   $('#btnCopy').addEventListener('click', copyToClipboard);
+
+  // ===== Export dropdown (F1) =====
+  const exportWrap = $('#exportWrap');
+  const exportMenu = $('#exportMenu');
+  const btnExport = $('#btnExport');
+
+  function setExportMenu(open) {
+    exportMenu.classList.toggle('show', open);
+    exportWrap.classList.toggle('open', open);
+    btnExport.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  btnExport.addEventListener('click', (e) => {
+    e.stopPropagation(); // 否则会立刻被下面的「点外部关闭」收掉
+    setExportMenu(!exportMenu.classList.contains('show'));
+  });
+
+  exportMenu.addEventListener('click', (e) => {
+    const item = e.target.closest('[data-export]');
+    if (!item) return;
+    setExportMenu(false);
+    runExport(item.dataset.export);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!exportWrap.contains(e.target)) setExportMenu(false);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') setExportMenu(false);
+  });
 
   // Open local file
   $('#btnOpenFile').addEventListener('click', () => $('#fileInput').click());
@@ -939,6 +1610,13 @@ $$
     if (e.key === 'Escape' && $('#previewPanel').classList.contains('fullscreen')) exitFullscreen();
   });
 
+  // Preview mode: 设备档
+  // 档位平铺成按钮组：用事件委托接整个组，点哪个切哪个
+  $('#deviceGroup').addEventListener('click', (e) => {
+    const btn = e.target.closest('.seg-btn');
+    if (btn) applyDevice(btn.dataset.device);
+  });
+
   // ===== Document Outline =====
   const outlinePanel = $('#outlinePanel');
   const outlineBody = $('#outlineBody');
@@ -953,16 +1631,15 @@ $$
       .trim()
       .toLowerCase();
 
-  const escapeHtml = (s) =>
-    String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-
   // Collect ATX headings (and their line numbers) from the markdown source,
   // skipping anything inside fenced code blocks.
   function getSourceHeadings() {
     const lines = editor.value.split('\n');
+    const fmLines = fmBlockLineCount();
     const out = [];
     let inFence = false;
     lines.forEach((line, idx) => {
+      if (idx < fmLines) return; // 元数据块不参与大纲
       const trimmed = line.trim();
       if (/^(```|~~~)/.test(trimmed)) { inFence = !inFence; return; }
       if (inFence) return;
@@ -1493,11 +2170,19 @@ $$
   // ===== Init =====
   function init() {
     loadContent();
+    applyDevice(pickSaved('mdtu-device', DEVICE_IDS, 'pc'));
+    // 平台档已并入设备档，清掉旧存档键，免得留着让人以为还能选
+    try { localStorage.removeItem('mdtu-platform'); } catch (e) { /* 隐私模式等场景忽略 */ }
     applyTheme(state.theme);
     applyWatermark();
     $('#btnPreviewScroll').classList.add('active');
     renderMarkdown();
     editor.focus();
+    // focus() 会把光标滚入视口，同步滚动再按比例把预览一起带偏，
+    // 表现为「一打开文档就不在开头」。显式把两个滚动容器拉回顶部。
+    suppressSync();
+    editor.scrollTop = 0;
+    previewWrap.scrollTop = 0;
   }
 
   // Wait for libraries
