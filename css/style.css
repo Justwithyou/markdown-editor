@@ -68,9 +68,25 @@ body {
   gap: 8px;
 }
 
+/* 顶栏在窄窗口下本来就装不下（1280px 下 #btnExport / #btnCopy 已经落到可视区外，
+   加「文件夹」入口后又把「外链转脚注」也挤了出去）。这里让中间那组退化成
+   可横向滚动的条 —— 右侧主操作（文件夹 / 打开 / 导出 / 复制）永不缺席。
+   `safe center` 是必需的：居中溢出会把左端裁掉且滚不回去。 */
+.header-left,
+.header-right {
+  flex-shrink: 0;
+}
+
 .header-center {
   flex: 1;
-  justify-content: center;
+  min-width: 0;
+  justify-content: safe center;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.header-center::-webkit-scrollbar {
+  height: 0;
 }
 
 .header-right {
@@ -973,6 +989,177 @@ body {
 .outline-level-4 { padding-left: 56px; font-size: 12px; }
 .outline-level-5 { padding-left: 70px; font-size: 12px; }
 .outline-level-6 { padding-left: 84px; font-size: 12px; }
+
+/* ===== F5：文件树抽屉 =====
+   刻意复用 .outline-panel 这套浮层骨架：display:none / .show 切换 / 打印时隐藏
+   三件事都由既有规则承担，这里只把它从「右侧居中浮层」改成「左侧通栏抽屉」。
+   毛玻璃只是叠在布局之上的观感，不参与任何尺寸计算。 */
+.file-tree-panel {
+  left: 12px;
+  right: auto;
+  top: calc(var(--header-height) + 12px);
+  bottom: 12px;
+  transform: none;
+  width: var(--ftw, 264px);
+  max-height: none;
+  background: rgba(255, 255, 255, .82);
+  backdrop-filter: blur(14px) saturate(1.7);
+  -webkit-backdrop-filter: blur(14px) saturate(1.7);
+}
+
+.tree-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 只读降级模式下的角标（完整模式为空字符串，不占位） */
+.tree-mode {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.tree-body {
+  padding: 6px 0;
+}
+
+/* 树顶那一行只写工作区名字，视觉上比缩进的行更靠左、更小 */
+.tree-root {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 12px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .2px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 0;   /* padding-left 由 JS 按层级内联设置 */
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: background .12s ease, color .12s ease;
+}
+
+.tree-row:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.tree-row.active {
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* 非文本文件灰显：树里还是要看得见，但不该抢注意力 */
+.tree-row.tree-muted {
+  color: var(--text-muted);
+}
+
+.tree-row.tree-muted:hover {
+  color: var(--text-secondary);
+}
+
+.tree-caret {
+  flex: 0 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  transition: transform .15s ease;
+}
+
+.tree-row.open .tree-caret {
+  transform: rotate(90deg);
+}
+
+.tree-ico {
+  flex: 0 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.tree-row.active .tree-ico {
+  color: var(--accent);
+}
+
+.tree-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 空目录 / 加载中 / 读取失败：各占一行，别让树看起来像断了 */
+.tree-note {
+  padding: 3px 10px;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.tree-note.tree-error {
+  color: var(--danger);
+}
+
+.tree-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.tree-empty p {
+  margin-top: 12px;
+}
+
+.tree-pick {
+  padding: 6px 14px;
+  font-size: 12px;
+}
+
+.tree-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  transition: background .15s ease;
+}
+
+.tree-resizer:hover,
+.tree-resizer.dragging {
+  background: var(--accent);
+}
+
+/* 探测不到文件夹 API 时入口整体摘掉；hidden 必须压过 .header-btn 的 inline-flex */
+.header-btn[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 768px) {
+  .file-tree-panel {
+    left: 8px;
+    width: min(var(--ftw, 264px), calc(100vw - 16px));
+  }
+}
 
 /* ===== Footnote Section ===== */
 .footnote-section {

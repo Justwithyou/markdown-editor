@@ -2167,6 +2167,439 @@ img { max-width: 100%; }`;
     if (e.key === 'Enter' && e.target.id === 'wmText') wmApply();
   });
 
+  // ===== F5：文件夹模式（只读）=====
+  // 目标：选定一个本地目录 → 枚举成文件树 → 点节点切换文档。
+  // 本期是 **F5-a**，全程不写盘：不保存、不新建、不重命名、不删除，磁盘只读。
+  //
+  // 三层渐进增强（见 F5-FOLDER-MODE.md §4.3）：
+  //   ① 'pick'     File System Access API：能拿到目录句柄（Edge / Chrome；file:// 也是安全上下文）
+  //   ② 'snapshot' <input webkitdirectory>：只有只读的文件快照，没有写回通道，作为更低一层保障
+  //   ③ 'none'     两者都没有（Firefox / Safari）：入口整体不渲染，退回既有单文档模式
+  // 探测只判「函数在不在」——该 API 由 [SecureContext] 门控，非安全上下文里它连函数都不存在，
+  // 所以这一行同时蕴含了「当前是否安全上下文」。
+  const FOLDER_CAP = (function () {
+    if (typeof window.showDirectoryPicker === 'function') return 'pick';
+    try {
+      if ('webkitdirectory' in document.createElement('input')) return 'snapshot';
+    } catch (e) { /* 老引擎忽略 */ }
+    return 'none';
+  })();
+
+  // 文本类扩展名可打开，其余灰显（点了只提示）
+  const TREE_TEXT_EXT = ['md', 'markdown', 'mdx', 'txt'];
+  // 命中即整棵剪掉 —— 不忽略的话，树会被依赖目录与产物淹没
+  const TREE_IGNORE = ['node_modules', '.git', 'dist', 'build', 'out', '.next', '.venv', '__pycache__', '.DS_Store'];
+  const TREE_W_KEY = 'mdtu-tree-width';
+
+  const ICON_CARET = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="9 6 15 12 9 18"/></svg>';
+  const ICON_DIR = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+  const ICON_FILE = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><polyline points="14 3 14 8 19 8"/></svg>';
+
+  const treePanel = $('#fileTreePanel');
+  const treeBody = $('#fileTreeBody');
+  const treeModeEl = $('#treeMode');
+  const btnOpenFolder = $('#btnOpenFolder');
+  const folderInput = $('#folderInput');
+  const treeResizer = $('#treeResizer');
+
+  // 树节点 = { name, kind:'dir'|'file', path, ref, children, loaded, loading, error }
+  // ref 在完整模式下是 FileSystemHandle，在只读快照模式下是 File 对象。
+  // children === null 表示「还没枚举过」，空数组才是「真的是空目录」——两者不能混。
+  const treeState = {
+    cap: FOLDER_CAP,
+    mode: FOLDER_CAP === 'pick' ? 'pick' : (FOLDER_CAP === 'snapshot' ? 'snapshot' : ''),
+    root: null,
+    currentPath: '',
+    expanded: new Set(),
+    visible: false,
+  };
+
+  function treeExt(name) {
+    const i = name.lastIndexOf('.');
+    return i > 0 ? name.slice(i + 1).toLowerCase() : '';
+  }
+  function isTextName(name) { return TREE_TEXT_EXT.indexOf(treeExt(name)) !== -1; }
+  function shouldIgnore(name) { return TREE_IGNORE.indexOf(name) !== -1; }
+  function joinPath(base, name) { return base ? base + '/' + name : name; }
+
+  function makeNode(name, kind, path, ref) {
+    return {
+      name: name, kind: kind, path: path, ref: ref || null,
+      children: null, loaded: false, loading: false, error: '',
+    };
+  }
+
+  // 目录在前、文件在后；同组内按中文 + 数字感知排序 ——
+  // numeric 必需，否则「第10章」会排在「第2章」前面
+  function sortTreeNodes(nodes) {
+    nodes.sort(function (a, b) {
+      if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1;
+      return a.name.localeCompare(b.name, 'zh', { numeric: true });
+    });
+  }
+
+  // 只枚举一层，子目录等用户点开时才读（懒加载）——
+  // 一次把整棵树铺开，几千文件的目录会直接卡死 UI
+  async function listChildren(dirHandle, basePath) {
+    const out = [];
+    for await (const h of dirHandle.values()) {
+      if (shouldIgnore(h.name)) continue;
+      out.push(makeNode(h.name, h.kind === 'directory' ? 'dir' : 'file', joinPath(basePath, h.name), h));
+    }
+    sortTreeNodes(out);
+    return out;
+  }
+
+  // 只读降级：<input webkitdirectory> 给的是一份扁平文件列表（带 webkitRelativePath），
+  // 拿不到目录句柄，这里按路径把树补出来，File 对象挂在叶子上。
+  function buildSnapshotTree(files) {
+    const rootName = ((files[0].webkitRelativePath || '').split('/')[0]) || '工作区';
+    const root = makeNode(rootName, 'dir', '', null);
+    root.children = [];
+    root.loaded = true;
+
+    files.forEach(function (file) {
+      const parts = (file.webkitRelativePath || file.name).split('/');
+      if (parts[0] === rootName) parts.shift();
+      if (!parts.length || parts.some(shouldIgnore)) return;
+
+      let dir = root;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const p = joinPath(dir.path, parts[i]);
+        let next = null;
+        for (let j = 0; j < dir.children.length; j++) {
+          if (dir.children[j].name === parts[i]) { next = dir.children[j]; break; }
+        }
+        if (!next) {
+          next = makeNode(parts[i], 'dir', p, null);
+          next.children = [];
+          next.loaded = true;
+          dir.children.push(next);
+        }
+        dir = next;
+      }
+      const leaf = parts[parts.length - 1];
+      dir.children.push(makeNode(leaf, 'file', joinPath(dir.path, leaf), file));
+    });
+
+    (function sortDeep(node) {
+      sortTreeNodes(node.children);
+      node.children.forEach(function (c) { if (c.kind === 'dir') sortDeep(c); });
+    })(root);
+    return root;
+  }
+
+  // ----- 渲染 -----
+
+  function noteRow(text, depth, isError) {
+    const el = document.createElement('div');
+    el.className = 'tree-note' + (isError ? ' tree-error' : '');
+    el.style.paddingLeft = (10 + depth * 13) + 'px';
+    el.textContent = text;
+    return el;
+  }
+
+  function buildRow(node, depth) {
+    const row = document.createElement('div');
+    row.className = 'tree-row';
+    row.dataset.path = node.path;
+    row.dataset.kind = node.kind;
+    row.style.paddingLeft = (10 + depth * 13) + 'px';
+
+    // 文件行也占住折叠箭头那一列（空槽），否则同级的图标与文字会左右错开
+    const lead = document.createElement('span');
+    if (node.kind === 'dir') {
+      row.classList.add('tree-dir');
+      if (treeState.expanded.has(node.path)) row.classList.add('open');
+      lead.className = 'tree-caret';
+      lead.innerHTML = ICON_CARET;
+    } else {
+      row.classList.add('tree-file');
+      if (!isTextName(node.name)) row.classList.add('tree-muted');
+      if (node.path === treeState.currentPath) row.classList.add('active');
+      lead.className = 'tree-caret tree-caret-empty';
+    }
+    row.appendChild(lead);
+
+    const ico = document.createElement('span');
+    ico.className = 'tree-ico';
+    ico.innerHTML = node.kind === 'dir' ? ICON_DIR : ICON_FILE;
+    row.appendChild(ico);
+
+    const name = document.createElement('span');
+    name.className = 'tree-name';
+    name.textContent = node.name;
+    row.title = node.path || node.name;
+    row.appendChild(name);
+    return row;
+  }
+
+  function appendRows(node, depth, frag) {
+    if (!node.children || !node.children.length) return;
+    node.children.forEach(function (child) {
+      frag.appendChild(buildRow(child, depth));
+      if (child.kind !== 'dir' || !treeState.expanded.has(child.path)) return;
+      if (child.loading) frag.appendChild(noteRow('加载中…', depth + 1));
+      else if (child.error) frag.appendChild(noteRow('读取失败：' + child.error, depth + 1, true));
+      else if (child.children && child.children.length === 0) frag.appendChild(noteRow('(空)', depth + 1));
+      else if (child.children) appendRows(child, depth + 1, frag);
+    });
+  }
+
+  function renderTree() {
+    treeBody.innerHTML = '';
+
+    if (!treeState.root) {
+      treeBody.innerHTML =
+        '<div class="tree-empty">' +
+        '<button type="button" class="btn-primary tree-pick" data-tree-pick="1">选择文件夹…</button>' +
+        '<p>打开后可以逐个浏览目录里的文档，点一下就切换。<br>本期为只读：不会改动磁盘上的任何文件。</p>' +
+        '</div>';
+      return;
+    }
+
+    const head = document.createElement('div');
+    head.className = 'tree-root';
+    head.textContent = treeState.root.name;
+    head.title = treeState.root.name;
+    treeBody.appendChild(head);
+
+    if (treeState.root.error) {
+      treeBody.appendChild(noteRow('读取失败：' + treeState.root.error, 0, true));
+      return;
+    }
+
+    const frag = document.createDocumentFragment();
+    appendRows(treeState.root, 0, frag);
+    treeBody.appendChild(frag);
+
+    const active = treeBody.querySelector('.tree-row.active');
+    if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
+  }
+
+  function findNode(path) {
+    if (!treeState.root || !path) return null;
+    let found = null;
+    (function walk(node) {
+      if (found || !node.children) return;
+      for (let i = 0; i < node.children.length; i++) {
+        const c = node.children[i];
+        if (c.path === path) { found = c; return; }
+        if (c.children) walk(c);
+      }
+    })(treeState.root);
+    return found;
+  }
+
+  // ----- 行为 -----
+
+  function setTreePanel(show) {
+    treeState.visible = show;
+    treePanel.classList.toggle('show', show);
+    if (btnOpenFolder) btnOpenFolder.classList.toggle('active', show);
+    if (show) renderTree();
+  }
+
+  async function toggleDir(node) {
+    if (treeState.expanded.has(node.path)) {
+      treeState.expanded.delete(node.path);
+      renderTree();
+      return;
+    }
+    treeState.expanded.add(node.path);
+
+    // 懒加载：只有完整模式下的目录才需要现读；快照模式的树已经一次性建好了
+    if (!node.loaded && node.ref) {
+      node.loading = true;
+      renderTree();
+      try {
+        node.children = await listChildren(node.ref, node.path);
+        node.loaded = true;
+        node.error = '';
+      } catch (err) {
+        // 单个子目录读不了（权限 / 被占用）只局部标红，不中断整棵树
+        node.error = (err && err.message) || String(err);
+        node.children = null;
+      }
+      node.loading = false;
+    }
+    renderTree();
+  }
+
+  // 解码顺序：BOM 优先 → 严格 UTF-8 → 失败即判「非 UTF-8」，按 GBK 只读预览。
+  // 「严格解码失败 = 非 UTF-8」这条判据是 F5-b 关闭写回通道的依据，先在这里定下来，
+  // 否则写回那天会把用户的原文件替换成乱码。
+  function tryDecodeStrict(label, bytes) {
+    try { return new TextDecoder(label, { fatal: true }).decode(bytes); } catch (e) { return null; }
+  }
+
+  function decodeBytes(bytes) {
+    if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+      return { text: tryDecodeStrict('utf-8', bytes.subarray(3)) || '', encoding: 'utf-8' };
+    }
+    if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
+      const t = tryDecodeStrict('utf-16le', bytes.subarray(2));
+      if (t !== null) return { text: t, encoding: 'utf-16le' };
+    }
+    if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
+      const t = tryDecodeStrict('utf-16be', bytes.subarray(2));
+      if (t !== null) return { text: t, encoding: 'utf-16be' };
+    }
+    const strict = tryDecodeStrict('utf-8', bytes);
+    if (strict !== null) return { text: strict, encoding: 'utf-8' };
+
+    let loose;
+    try { loose = new TextDecoder('gbk').decode(bytes); }
+    catch (e) { loose = new TextDecoder('utf-8').decode(bytes); }
+    return { text: loose, encoding: 'non-utf8' };
+  }
+
+  async function readNodeText(node) {
+    let bytes;
+    if (treeState.mode === 'snapshot') {
+      bytes = new Uint8Array(await node.ref.arrayBuffer());
+    } else {
+      bytes = new Uint8Array(await (await node.ref.getFile()).arrayBuffer());
+    }
+    return decodeBytes(bytes);
+  }
+
+  async function openTreeNode(node) {
+    try {
+      const dec = await readNodeText(node);
+      // 换文档就是换 editor.value —— 渲染层是纯函数，主题 / 元数据 / 大纲 /
+      // 字数统计 / 水印 / 外链脚注全部自动跟随，这里一行都不用改。
+      editor.value = dec.text;
+      renderMarkdown();
+      // 沿用单文档那套存档：刷新后仍停在这篇（F5-b 再换成工作区存档）
+      saveContent();
+      treeState.currentPath = node.path;
+      suppressSync();
+      editor.scrollTop = 0;
+      previewWrap.scrollTop = 0;
+      renderTree();
+      const note = dec.encoding === 'non-utf8' ? '（非 UTF-8，已按 GBK 只读预览）'
+        : (dec.encoding.indexOf('utf-16') === 0 ? '（' + dec.encoding.toUpperCase() + '，仅只读预览）' : '');
+      showToast('已打开：' + node.path + note);
+    } catch (err) {
+      showToast('打开失败：' + ((err && err.message) || err), 'error');
+    }
+  }
+
+  async function pickFolder() {
+    if (treeState.mode !== 'pick') return;
+    let handle;
+    try {
+      handle = await window.showDirectoryPicker();
+    } catch (err) {
+      return; // 用户按了取消 —— 不是错误，不打扰
+    }
+    if (!handle) return;
+
+    treeState.root = makeNode(handle.name, 'dir', '', handle);
+    treeState.currentPath = '';
+    treeState.expanded.clear();
+    renderTree();
+    setTreePanel(true);
+
+    // 顶层先读一层，用户点开子目录时再往下钻
+    treeState.root.loading = true;
+    renderTree();
+    try {
+      treeState.root.children = await listChildren(handle, '');
+      treeState.root.loaded = true;
+    } catch (err) {
+      treeState.root.error = (err && err.message) || String(err);
+    }
+    treeState.root.loading = false;
+    renderTree();
+    showToast('已打开文件夹：' + handle.name);
+  }
+
+  // 「选择文件夹」在两种能力下走两条通道：完整模式有目录句柄，快照模式只能借 input
+  function requestFolder() {
+    if (treeState.mode === 'pick') { pickFolder(); return; }
+    if (treeState.mode === 'snapshot') folderInput.click();
+  }
+
+  function onFolderInputChange(e) {
+    const files = Array.prototype.slice.call(e.target.files || []);
+    e.target.value = '';   // 清空才能重复选同一个目录
+    if (!files.length) return;
+
+    treeState.root = buildSnapshotTree(files);
+    treeState.currentPath = '';
+    treeState.expanded.clear();
+    setTreePanel(true);
+    showToast('已打开文件夹：' + treeState.root.name + '（只读快照）');
+  }
+
+  function onTreeRowClick(row) {
+    const node = findNode(row.dataset.path);
+    if (!node) return;
+    if (node.kind === 'dir') { toggleDir(node); return; }
+    if (!isTextName(node.name)) {
+      showToast('只支持打开文本文件（' + TREE_TEXT_EXT.join(' / ') + '）');
+      return;
+    }
+    openTreeNode(node);
+  }
+
+  // 抽屉宽度：拖动右缘调整，宽度存在 CSS 变量 --ftw 上，并记进 localStorage
+  (function initTreeWidth() {
+    const saved = parseInt(localStorage.getItem(TREE_W_KEY), 10);
+    if (!isNaN(saved) && saved >= 180 && saved <= 640) treePanel.style.setProperty('--ftw', saved + 'px');
+  })();
+
+  let treeResizing = false;
+
+  treePanel.addEventListener('click', function (e) {
+    if (e.target.closest('[data-tree-pick]')) { requestFolder(); return; }
+    const row = e.target.closest('.tree-row');
+    if (row) onTreeRowClick(row);
+  });
+
+  treeResizer.addEventListener('mousedown', function (e) {
+    treeResizing = true;
+    treeResizer.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function (e) {
+    if (!treeResizing) return;
+    const w = Math.min(640, Math.max(180, e.clientX - 12));
+    treePanel.style.setProperty('--ftw', w + 'px');
+  });
+
+  document.addEventListener('mouseup', function () {
+    if (!treeResizing) return;
+    treeResizing = false;
+    treeResizer.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    const w = parseInt(treePanel.style.getPropertyValue('--ftw'), 10);
+    if (!isNaN(w)) { try { localStorage.setItem(TREE_W_KEY, String(w)); } catch (e) {} }
+  });
+
+  // 能力不够时把入口与抽屉整块摘掉，而不是渲染出来再报错
+  function initFolderMode() {
+    if (FOLDER_CAP === 'none') {
+      [btnOpenFolder, folderInput, treePanel].forEach(function (el) {
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+      });
+      return;
+    }
+    btnOpenFolder.hidden = false;
+    treeModeEl.textContent = FOLDER_CAP === 'snapshot' ? '只读' : '';
+
+    btnOpenFolder.addEventListener('click', function () { setTreePanel(!treeState.visible); });
+    $('#treeClose').addEventListener('click', function () { setTreePanel(false); });
+    folderInput.addEventListener('change', onFolderInputChange);
+    renderTree();
+  }
+
   // ===== Init =====
   function init() {
     loadContent();
@@ -2175,6 +2608,7 @@ img { max-width: 100%; }`;
     try { localStorage.removeItem('mdtu-platform'); } catch (e) { /* 隐私模式等场景忽略 */ }
     applyTheme(state.theme);
     applyWatermark();
+    initFolderMode();
     $('#btnPreviewScroll').classList.add('active');
     renderMarkdown();
     editor.focus();

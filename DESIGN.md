@@ -52,12 +52,12 @@
 
 ```
 mdtu-editor/
-├── index.html        # 页面结构 + CDN 依赖引入 + 图标声明（426 行）
+├── index.html        # 页面结构 + CDN 依赖引入 + 图标声明（451 行）
 ├── Markdown.ico      # 站点图标，六帧（16/32/48/64/128/256）；页头 / 标签页 / 桌面快捷方式共用
 ├── css/
-│   └── style.css     # 全部样式：2 套主题 + 布局 + 弹窗 + 水印 + 元数据 + 设备档预览 + 导出下拉 + 打印（1417 行）
+│   └── style.css     # 全部样式：2 套主题 + 布局 + 弹窗 + 水印 + 元数据 + 设备档预览 + 文件树抽屉 + 导出下拉 + 打印（1604 行）
 ├── js/
-│   └── app.js        # 全部逻辑：解析/渲染/大纲/水印/模板/元数据/复制/导出/设备档预览（2195 行）
+│   └── app.js        # 全部逻辑：解析/渲染/大纲/水印/模板/元数据/复制/导出/设备档预览/文件夹模式（2629 行）
 ├── README.md         # 项目说明（GitHub 标准格式）
 ├── ROADMAP.md        # 未来功能升级路线（独立文档）
 ├── DESIGN.md         # 本文档
@@ -146,7 +146,9 @@ preview.innerHTML = html  ← 写入预览区
 |------|------|
 | 左侧 `.header-left` | Logo：`📝 Markdown-Editor` |
 | 中间 `.header-center` | 主题切换（**2026-10-13 起放开供评估**）、大纲、自动编号、插入目录、方格背景、使用模板、水印 |
-| 右侧 `.header-right` | 打开文件、更多工具、外链转脚注、**导出（下拉菜单）**、**复制（primary 主按钮）** |
+| 右侧 `.header-right` | **文件夹（F5 入口）**、打开文件、更多工具、外链转脚注、**导出（下拉菜单）**、**复制（primary 主按钮）** |
+
+**装不下时怎么办。** 顶栏在 1280px 宽度下本来就装不下（F5 之前 `#btnExport` / `#btnCopy` 已落到可视区外），再加一个「文件夹」入口只会更挤。现在的规则是：**中间那组退化成可横向滚动的条，右侧主操作（文件夹 / 打开 / 导出 / 复制）永不缺席**——`.header-left` / `.header-right` 都是 `flex-shrink: 0`，`.header-center` 加 `min-width: 0; overflow-x: auto; justify-content: safe center`（`safe` 必不可少：居中溢出会把左端裁掉且滚不回去）。这与编辑工具栏 `.editor-toolbar` 的既有做法一致。
 
 ### 5.2 主区双栏（`.app-main`）
 
@@ -177,7 +179,7 @@ preview.innerHTML = html  ← 写入预览区
 | `#linksModal` | 760px (modal-lg) | 工具/开源项目导航（三 Tab） |
 | `#watermarkModal` | 680px (modal-md) | 水印设置（左表单 + 右预览） |
 
-另有悬浮组件：文档大纲 `.outline-panel`（右侧垂直居中悬浮）、Toast 提示 `.toast`。
+另有悬浮组件：文档大纲 `.outline-panel`（右侧垂直居中悬浮）、**文件树抽屉 `.file-tree-panel`**（左侧，F5，见 7.10）、Toast 提示 `.toast`。
 
 ---
 
@@ -285,7 +287,7 @@ preview.innerHTML = html  ← 写入预览区
 
 ### 7.8 导出能力（`// ===== Export (F1) =====`，app.js:1041–1332）
 
-顶栏「复制」**左侧**新增**「导出」下拉**（`index.html:94–124`，样式 `style.css:164–238`），把四个动作收进一个菜单，避免顶栏按钮继续横向膨胀。四个动作全部通过**浏览器下载**落盘（`Blob` + `URL.createObjectURL` + `<a download>`），不经过任何服务端；**零新增依赖**。
+顶栏「复制」**左侧**新增**「导出」下拉**（`index.html:102–132`，样式 `style.css:180–254`），把四个动作收进一个菜单，避免顶栏按钮继续横向膨胀。四个动作全部通过**浏览器下载**落盘（`Blob` + `URL.createObjectURL` + `<a download>`），不经过任何服务端；**零新增依赖**。
 
 | 动作 | `data-export` | 实现 | 产物 |
 |---|---|---|---|
@@ -311,7 +313,7 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 
 > **`data-page-node-id` 是什么？** 这份 `index.html` 一旦托管成 WorkBuddy 资料库的「页面」，页面平台就会给每个元素打上这个东西（内部叫 `pnid`），用于**节点级评论**与**「划词让 AI 改」的改动定位**（见内置 `library` 技能的 `page/edit-flow.md`）。它对运行没有任何影响，但会随 `preview.cloneNode(true)` 混进公众号与导出文件。**2026-10-13 已确认项目里零处读取它，整批清除了 312 处**；`stripEditorOnlyAttrs()`（app.js:919）留在 `copyToClipboard()`（app.js:942）与 `clonePreviewForExport()`（app.js:1106）两条克隆路径上做防御——文件若再被托管回资料库，属性会重新出现。ex-test 有一条「手动注入 pnid → 导出应剥掉」的用例锁着这段逻辑。
 
-**导出 PDF 的打印样式（`style.css:1328–1417`），六组规则：**
+**导出 PDF 的打印样式（`style.css:1515–1604`），六组规则：**
 
 1. **隐藏界面壳子**：`.app-header` / `.editor-panel` / `.resizer` / `.preview-toolbar` / `.outline-panel` / `.toast` / `.modal-overlay`
 2. **解除页面级锁定**：`html, body { height: auto; overflow: visible }`、`body { display: block }`、`.app-main { display: block; overflow: visible }`
@@ -320,7 +322,7 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 5. **`#preview { print-color-adjust: exact }`**：暗色主题按原色打印，不被浏览器「省墨」洗成白底
 6. **分页控制**：`pre` / `blockquote` / `table` / `.mermaid-rendered` / `.katex-display` / `.fm-block` 加 `break-inside: avoid`，`h1`–`h6` 加 `break-after: avoid`，`p, li` 设 `orphans: 2; widows: 2`
 
-另有 `@page { margin: 16mm }` 放在 `@media print` **之外**（`style.css:1332`）——`@page` 本身就是页面级 at-rule，放外面更直观，两条规则都有断言盯着。
+另有 `@page { margin: 16mm }` 放在 `@media print` **之外**（`style.css:1519`）——`@page` 本身就是页面级 at-rule，放外面更直观，两条规则都有断言盯着。
 
 **导出 Word 的兼容性子集（`buildWordHtml()`，app.js:1241）。** `application/msword` + `.doc` 套壳，本质仍是 HTML。Word / WPS 只认一小撮 CSS，因此：
 
@@ -337,7 +339,7 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 
 ### 7.9 预览模式：设备档
 
-同一篇稿子在 PC、平板、手机上的观感差别很大，而这个差别只有到发布那一刻才暴露。预览工具栏左侧的**一组设备档按钮**（`index.html:236–242`）把这个差别提前搬到预览里。
+同一篇稿子在 PC、平板、手机上的观感差别很大，而这个差别只有到发布那一刻才暴露。预览工具栏左侧的**一组设备档按钮**（`index.html:244–250`）把这个差别提前搬到预览里。
 
 **一、只有设备一个维度，平台规则内建在档位里。** 早期版本把「设备端」与「展示端（Web / 公众号 / 掘金）」拆成两个正交维度，后来**合并成一维**——因为每档设备其实只对应一种典型阅读场景，让用户自由组合反而会造出「PC × 公众号」这种现实中不存在的组合：
 
@@ -375,7 +377,7 @@ preview.className = [
 
 全文**只允许这一处写 `preview.className = [`**（ex-test 有断言 `eq((appSrc.match(/preview\.className = \[/g)||[]).length, 1)` 锁着）。任何一处直接整串覆盖，都会把其余几维静默冲掉——这是多维共存能被破坏的唯一方式。`applyTheme()` / `applyDevice()` 都只改 `state` 再调它，方格背景按钮也从 `classList.toggle('grid-bg', …)` 改为同一出口。
 
-**四、版心：设备视口压一道 820px 上限（`style.css:452`）。**
+**四、版心：设备视口压一道 820px 上限（`style.css:468`）。**
 
 ```css
 .markdown-body {
@@ -420,6 +422,30 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 | APP | 375px | 343px | 17px | 1.75 | 0.5px | 折行（`white-space: pre-wrap`） |
 
 `applyDevice()`（app.js:903）负责落盘（`mdtu-device`）、同步按钮激活态（`syncSegBtns()`）与 `previewScroll.classList.toggle('device-frame', …)`（非 PC 档压深底衬，设备边界才看得见）；`init()` 里用 `pickSaved()` 校验存档值后套用。**切换不弹 Toast**：档位本身就写着 `PC` / `iPad` / `APP`、按钮高亮即选中态，变的是正文本身；再弹一个浮层挡住正文并停留 2.5s，是纯粹的信息噪声。工具栏上也不写「设备」二字——三个档位自明，多一个标签只是占掉横向空间。
+
+---
+
+### 7.10 文件夹模式（F5-a，只读）
+
+`js/app.js` 末尾的 `// ===== F5：文件夹模式（只读）=====` 段。目标是「打开一个本地目录 → 文件树 → 点节点切换文档」，**本期全程不写盘**：不保存、不新建、不重命名、不删除。
+
+**能力探测分三层，逐层降级**。探测只判函数是否存在——该 API 由 `[SecureContext]` 门控，非安全上下文里连函数都不存在，所以这一行同时蕴含了「当前是不是安全上下文」：
+
+| 层 | 判据 | 结果 |
+|---|------|------|
+| ① | `typeof window.showDirectoryPicker === 'function'` | 完整模式：能拿到目录句柄（Edge / Chrome，`file://` 亦可用） |
+| ② | `'webkitdirectory' in input` | 只读快照模式：`<input webkitdirectory>` 给的扁平文件列表，按 `webkitRelativePath` 补出树 |
+| ③ | 都不成立（Firefox / Safari） | **入口与抽屉整块从 DOM 摘掉**，退回单文档模式 |
+
+**节点模型**：`{ name, kind, path, ref, children, loaded, loading, error }`。`path` 是工作区内的相对路径，同时充当文档 id；`ref` 在完整模式下是 `FileSystemHandle`、在快照模式下是 `File` 对象；`children === null` 表示「还没枚举过」，空数组才是「真的是空目录」。
+
+**枚举是懒的**：只列「已展开」的目录（`for await (const h of dirHandle.values())`），子目录点开才读——不这么做，几千文件的目录会直接卡死 UI。默认忽略 `node_modules` / `.git` / `dist` / `build` / `out` / `.next` / `.venv` / `__pycache__` / `.DS_Store`，命中即整棵剪掉；排序是「目录在前、文件在后」+ `localeCompare(zh, { numeric: true })`（`numeric` 必需，否则 `第10章` 会排到 `第2章` 前面）。单个子目录读失败只局部标红，**不中断整棵树**。
+
+**切换文档 = 换 `editor.value` + 调一次 `renderMarkdown()`**：换完把两个滚动容器显式拉回顶部并 `suppressSync()`，再 `saveContent()` 沿用单文档那套存档（刷新后仍停在这篇）。
+
+**编码判据（这也是 F5-b 关闭写回通道的依据，先在这里定下来）**：`decodeBytes()` 按「UTF-8 BOM → UTF-16 BOM → 严格 UTF-8（`TextDecoder('utf-8', { fatal: true })`）→ 失败即判非 UTF-8，回退 `TextDecoder('gbk')`」的顺序解码。BOM 会被剥掉，与 `FileReader.readAsText` 的既有行为一致；非 UTF-8 / UTF-16 只读预览并明确提示。
+
+**UI 复用**：抽屉刻意带上 `.outline-panel` 类——浮层骨架、`.show` 切换、**打印时隐藏**三件事都由那一套既有规则承担，`.file-tree-panel` 只把它从「右侧居中浮层」改成「左侧通栏抽屉」（毛玻璃 + 宽度拖拽，宽度记在 `mdtu-tree-width`）。文件行会占住折叠箭头那一列（空槽），否则同级目录与文件的图标 / 文字会左右错开。
 
 ---
 
@@ -470,6 +496,7 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 | `mdtu-watermark` | 水印配置（JSON） |
 | `mdtu-fs-width` | 全屏页宽 |
 | `mdtu-device` | 预览设备档（`pc` / `ipad` / `app`） |
+| `mdtu-tree-width` | 文件树抽屉宽度（180–640px） |
 
 > 早先还有一个 `mdtu-platform`（展示端）。平台维度并入设备档后，`init()` 会主动把它从 localStorage 里 `removeItem` 清掉。
 | `mdtu-frontmatter` | 元数据展示方式（`panel` / `codeBlock` / `hide`，旧值 `table` 读取时自动迁移） |
@@ -503,7 +530,7 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 | **F2** | 界面与交互优化 | P1 | ⬜ 待规划 | 字体排版 / 交互效率 / 提示反馈 / 无障碍 / 响应式 |
 | **F3** | 主题模板体系 | P1 | 🟦 部分落地 | 已精简为 2 套自研主题（GitHub / 晴空蓝）+ 旧值收敛；外部主题生态调研见 [F3-THEME-RESEARCH.md](./F3-THEME-RESEARCH.md)，结论是「先把 2 套做扎实」、推荐自研 token→CSS 生成器（见 7.9 相关的平行维护问题） |
 | **F4** | 文档元数据解析与展示 | P1 | ✅ 已完成 | YAML Front Matter → 顶部「属性」面板（类型图标 + 标签样式）+ 三档展示（见 7.7） |
-| **F5** | 文件夹模式 | P1 | ⬜ 待规划 | 打开文件夹 + 文件树 + 写回磁盘；原生 File System Access API、零依赖；方案见 [F5-FOLDER-MODE.md](./F5-FOLDER-MODE.md) |
+| **F5** | 文件夹模式 | P1 | 🟦 部分落地 | **F5-a（只读）已完成**：打开文件夹 + 文件树 + 切换文档 + 三层能力降级（见 7.10）；写回 / 文件管理 / 冲突检测未做，方案见 [F5-FOLDER-MODE.md](./F5-FOLDER-MODE.md) |
 | **F6** | 预览模式（设备档） | P1 | ✅ 已完成 | 设备档（PC / iPad / APP）平铺档位，每档内建对应阅读场景（Web / Web + 平板适配 / 公众号），只影响预览、不进产物（见 7.9） |
 
 **共同前置约束**：项目是「零构建 + CDN」纯静态三文件，新增依赖要么走 CDN `<script>`，要么引入构建步骤并改变「双击即跑」的性质。

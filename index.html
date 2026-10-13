@@ -78,6 +78,14 @@
       </button>
     </div>
     <div class="header-right">
+      <!-- F5 文件夹模式入口。默认 hidden：不支持相关 API 的浏览器（Firefox / Safari）
+           由 app.js 直接把这个节点整块摘掉，而不是渲染出来再报错 -->
+      <button class="header-btn" id="btnOpenFolder" hidden title="打开本地文件夹（浏览工作区内的 Markdown 文档）">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><line x1="7" y1="12.5" x2="17" y2="12.5"/><line x1="7" y1="16" x2="13" y2="16"/></svg>
+        <span>文件夹</span>
+      </button>
+      <!-- 只读降级通道：不支持 File System Access API 时改走这条（非安全上下文下也可用） -->
+      <input type="file" id="folderInput" webkitdirectory style="display:none;">
       <button class="header-btn" id="btnOpenFile" title="打开本地 Markdown 文件">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
         <span>打开</span>
@@ -407,6 +415,23 @@
         <button class="btn-primary" id="wmApply">应用</button>
       </div>
     </div>
+  </div>
+
+  <!-- F5 文件树抽屉。
+       class 里刻意带上 .outline-panel：浮层骨架、.show 切换、打印时隐藏这三件事
+       都由那一套既有样式承担，样式表里只把它从「右侧居中浮层」改成「左侧通栏抽屉」。 -->
+  <div class="outline-panel file-tree-panel" id="fileTreePanel">
+    <div class="outline-header">
+      <span>文件树<span class="tree-mode" id="treeMode"></span></span>
+      <span class="tree-head-actions">
+        <button class="outline-close" id="treePickBtn" data-tree-pick="1" title="选择 / 更换文件夹">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><line x1="12" y1="10.5" x2="12" y2="16.5"/><line x1="9" y1="13.5" x2="15" y2="13.5"/></svg>
+        </button>
+        <button class="outline-close" id="treeClose" title="收起文件树">&times;</button>
+      </span>
+    </div>
+    <div class="outline-body tree-body" id="fileTreeBody"></div>
+    <div class="tree-resizer" id="treeResizer" title="拖动调整宽度"></div>
   </div>
 
   <!-- Floating Outline Panel -->

@@ -30,10 +30,12 @@
 | F2 | 界面与交互优化 | P1 | ⬜ | 无 | 中～大 |
 | F3 | 主题模板体系 | P1 | 🟦 部分 | 建议先解决内联样式问题 | 大 |
 | F4 | 文档元数据（Front Matter）解析与展示 | P1 | ✅ | 无 | 小～中 |
-| F5 | 文件夹模式（打开整个文件夹并写回磁盘） | P1 | ⬜ | 无（建议先做只读的 F5-a） | 中～大 |
+| F5 | 文件夹模式（打开整个文件夹并写回磁盘） | P1 | 🟦 部分 | 无（建议先做只读的 F5-a） | 中～大 |
 | F6 | 预览模式（设备档） | P1 | ✅ | 无 | 小～中 |
 
 > **F3 标记为「🟦 部分」的原因**：2026-10-13 已落地**主题精简**（4 套 → 2 套：GitHub / 晴空蓝），并完成**两个外部对标站点的可行性调研**（独立文档 [F3-THEME-RESEARCH.md](./F3-THEME-RESEARCH.md)）；但主题体系的架构重构（内联样式、token → CSS、代码主题独立切换）尚未开始。
+
+> **F5 标记为「🟦 部分」的原因**：2026-10-13 已落地只读的 **F5-a**（打开文件夹 + 文件树 + 切换文档 + 三层能力降级），风险最高、才算「实时编辑」的写回（F5-b）与文件管理（F5-c）、外部修改检测（F5-d）均未做。**本期全程不写盘**。
 
 **共同前置约束**：项目目前是「零构建 + CDN 引入」的纯静态三文件，任何新增依赖都要么走 CDN `<script>`，要么会引入构建步骤并改变「双击 `index.html` 就能跑」这一性质。引入前请先在此登记并同步更新 README。
 
@@ -92,7 +94,7 @@ await navigator.clipboard.writeText(editor.value);
 | **A（推荐先做）** | `window.print()` + 新增 `@media print` 规则 | 零依赖、矢量清晰、可选页边距/页眉页脚 | 需用户在打印对话框选「另存为 PDF」，多一步 |
 | B | html2pdf.js（html2canvas + jsPDF） | 一键直出 | 基于截图，中文 / KaTeX / Mermaid SVG 易糊或缺失；新增约 200KB CDN 依赖 |
 
-注意：`css/style.css` 当时**完全没有 `@media print` 规则**（全文 0 处），走方案 A 必须补上，否则打印结果会带上顶栏、工具栏和编辑区。落地时已补齐——`@page { margin: 16mm }` 放在 `style.css:1332`（媒体查询**之外**），`@media print { … }` 主体在 `style.css:1336` 起。
+注意：`css/style.css` 当时**完全没有 `@media print` 规则**（全文 0 处），走方案 A 必须补上，否则打印结果会带上顶栏、工具栏和编辑区。落地时已补齐——`@page { margin: 16mm }` 放在 `style.css:1519`（媒体查询**之外**），`@media print { … }` 主体在 `style.css:1523` 起。
 
 #### 4. 导出 Word — 两方案二选一
 
@@ -103,11 +105,11 @@ await navigator.clipboard.writeText(editor.value);
 
 ### 任务拆解
 
-- [x] 顶部新增「导出」下拉组件（HTML + CSS）：`#exportWrap` / `#btnExport` / `#exportMenu` + 4 个 `.export-item[data-export="md|html|pdf|word"]`，带 `role="menu"` / `aria-haspopup` / `aria-expanded`（`index.html:94–124`）
+- [x] 顶部新增「导出」下拉组件（HTML + CSS）：`#exportWrap` / `#btnExport` / `#exportMenu` + 4 个 `.export-item[data-export="md|html|pdf|word"]`，带 `role="menu"` / `aria-haspopup` / `aria-expanded`（`index.html:102–132`）
 - [x] 抽出 `buildStandaloneHtml()`（规划里叫 `exportHtml()`）：主题样式 + hljs 样式 + KaTeX 样式内联，并先做 `url()` 绝对化
 - [x] 实现复制 Markdown（含 `file://` / 非安全上下文下的 `execCommand('copy')` 降级路径）
 - [x] 实现导出 HTML：**文件名按「元数据 `title` → 首个 H1 → `document`」取**（规划只写了「取首个 H1」），非法字符清洗 + 80 字符截断
-- [x] 补充 `@media print` 样式（`style.css:1332` `@page` + `:1320` `@media print`），实现导出 PDF
+- [x] 补充 `@media print` 样式（`style.css:1519` `@page` + `:1320` `@media print`），实现导出 PDF
 - [x] 实现导出 Word（方案 A：`application/msword` + `.doc` 套壳；`WORD_COMPAT_CSS` 用 `pt` 兜底，元数据面板降级为两列表格）
 - [x] 四个动作统一接入 Toast 成功/失败反馈
 
@@ -171,7 +173,7 @@ cd .workbuddy/tools && npm i && node ex-test.js
 2. **块级公式不渲染**（即上文那条既有回归）。
 3. **`--print-to-pdf` 拿到 0 字节但退出码为 0**——Windows 上 Edge 是**启动器进程**，命令行进程立刻退出，PDF 由真正的浏览器进程**异步落盘**。必须轮询「文件存在且大小连续两次不变」才能认为产物完成。
 4. **headless 下 CDN 没加载完就截图**——`--virtual-time-budget` 会把 `setTimeout` 的虚拟时钟提前推爆，探针在真实 CDN 回来之前就报了 `marked=undefined`，截图是白纸。做视觉核对时改为把 CDN 引用改指本机代理（内容仍取 jsDelivr 原文件，只是多了磁盘缓存），虚拟时钟才不再和真实网络打架；同时用页面探针回传 `editorLen` / `previewLen` / `katexNodes` 作为「确实渲染了」的证据，而不是靠猜等待时间。
-5. **`indexOf('@media print')` 命中了注释里的同名字样**（`style.css:1336` 的注释正文），导致抠出来的「打印样式」是旁边的 `@page` 块。改为用正则要求 `@media print` 后面真的跟 `{`。
+5. **`indexOf('@media print')` 命中了注释里的同名字样**（`style.css:1523` 的注释正文），导致抠出来的「打印样式」是旁边的 `@page` 块。改为用正则要求 `@media print` 后面真的跟 `{`。
 
 ---
 
@@ -181,7 +183,7 @@ cd .workbuddy/tools && npm i && node ex-test.js
 
 | 问题 | 代码依据 |
 |------|----------|
-| ~~无打印样式~~ | **F1 已补齐**：`css/style.css:1332` `@page` + `:1320` `@media print` |
+| ~~无打印样式~~ | **F1 已补齐**：`css/style.css:1519` `@page` + `:1320` `@media print` |
 | 无障碍属性覆盖极少 | 仅 F1 新增的「导出」下拉带了 `role="menu"` / `aria-haspopup` / `aria-expanded`（`app.js:1466` 同步 `aria-expanded`）；其余按钮与弹窗仍无 `aria-label` / `role="dialog"` |
 | 字体栈缺兜底 | 编辑器使用 `JetBrains Mono / Fira Code / SF Mono / Cascadia Code`，多数机器未安装，实际回退到系统默认，观感不一致 |
 | 提示无分级 | `showToast(msg, type)` 支持 `success` / `error`，但调用处几乎只用 success；失败路径（如 URL 采集失败）反馈不足 |
@@ -575,7 +577,7 @@ splitFrontMatter(源码) → marked.parse(body) → 前置元数据面板
 
 ## F5 · 文件夹模式（打开整个文件夹并写回磁盘）
 
-> **状态：⬜ 待规划**（2026-10-13 登记）。完整技术方案、交互设计、数据模型与边界清单见 **[F5-FOLDER-MODE.md](./F5-FOLDER-MODE.md)**；本节只记录登记信息与关键结论，避免两处各写一份。
+> **状态：🟦 F5-a 已实现**（2026-10-13 落地，分支 `feature-folder`）；F5-b / F5-c / F5-d 待做。完整技术方案、交互设计、数据模型与边界清单见 **[F5-FOLDER-MODE.md](./F5-FOLDER-MODE.md)**；本节只记录登记信息与关键结论，避免两处各写一份。落地时新增回归套件 `fs-test.js`（104 条断言）。
 
 ### 背景
 
@@ -629,12 +631,12 @@ splitFrontMatter(源码) → marked.parse(body) → 前置元数据面板
 
 **推荐分期：**
 
-| 阶段 | 内容 | 依赖 | 风险 |
-|------|------|------|------|
-| **F5-a** | 打开文件夹（**只读**）：文件树 + 切换文档 + 复用现有渲染 | 无 | 零（不碰磁盘） |
-| F5-b | 写回：`Ctrl+S` 存盘 + 脏标记 + 重新授权 + `.bak` 保护 | 无 | **最高**（覆盖磁盘） |
-| F5-c | 文件管理：新建 / 重命名 / 删除 + 忽略规则 + 懒加载 | F5-a | 中 |
-| F5-d | 外部修改检测 + 冲突提示 | F5-b | 中 |
+| 阶段 | 内容 | 依赖 | 风险 | 状态 |
+|------|------|------|------|------|
+| **F5-a** | 打开文件夹（**只读**）：文件树 + 切换文档 + 复用现有渲染 | 无 | 零（不碰磁盘） | ✅ 已完成 |
+| F5-b | 写回：`Ctrl+S` 存盘 + 脏标记 + 重新授权 + `.bak` 保护 | 无 | **最高**（覆盖磁盘） | ⬜ 待做 |
+| F5-c | 文件管理：新建 / 重命名 / 删除 + 忽略规则 + 懒加载 | F5-a | 中 | ⬜ 待做 |
+| F5-d | 外部修改检测 + 冲突提示 | F5-b | 中 | ⬜ 待做 |
 
 先做 F5-a 的理由：交付快、风险为零，且能立刻验证「文件夹模式是不是真的会一直用」。F5-b 虽然才叫「实时编辑」，风险却最高，应在文件树与切换都稳定之后再叠加。
 
@@ -644,17 +646,19 @@ F5 **不越界**：纯本地、不碰后端，与「非目标」中的「云同�
 
 ### 任务拆解
 
-- [ ] **前置验证**：真浏览器手动点一次 `showDirectoryPicker()`，确认 `file://` 下能弹出目录选择器
-- [ ] **F5-a** 能力探测与降级：不支持时保持现有单文档模式，UI 不露出入口
-- [ ] **F5-a** 文件树 UI（落点复用现有浮层，`#outlinePanel` 见 app.js:1621 / 1766）
-- [ ] **F5-a** 目录递归枚举：忽略 `node_modules` / `.git` / `dist`，子目录懒加载
-- [ ] **F5-a** 文档切换：换 `editor.value` → `renderMarkdown()`，含未保存内容确认
+- [x] **前置验证**：真浏览器手动点一次 `showDirectoryPicker()`，确认 `file://` 下能弹出目录选择器（2026-10-13 确认可用）
+- [x] **F5-a** 能力探测与降级：不支持时保持现有单文档模式，UI 不露出入口
+- [x] **F5-a** 文件树 UI（落点复用现有浮层，`#outlinePanel` 见 app.js:1621 / 1766）
+- [x] **F5-a** 目录递归枚举：忽略 `node_modules` / `.git` / `dist`，子目录懒加载
+- [x] **F5-a** 文档切换：换 `editor.value` → `renderMarkdown()`
 - [ ] **F5-b** 拆出「按文档存取」的持久化层，替代固定的 `mdtu-content`
 - [ ] **F5-b** `Ctrl+S` 写回磁盘 + 脏标记 + 首次接管某文件时先写 `.bak`
-- [ ] **F5-b** 换行符（CRLF / LF）原样保留 + 编码嗅探（非 UTF-8 只读打开并提示）
+- [ ] **F5-b** 换行符（CRLF / LF）原样保留 + 编码嗅探的**写回侧**（读侧判据已在 F5-a 落地：非 UTF-8 一律关闭写回通道）
 - [ ] **F5-c** 新建 / 重命名 / 删除 + 危险操作二次确认
 - [ ] **F5-d** 外部修改检测（窗口重新聚焦 + 切换文件两个时机，或 `FileSystemObserver`）+ 冲突二选一提示
-- [ ] 同步更新 README / DESIGN / 本文件，并修订「已知限制」第 2 条
+- [x] 同步更新 README / DESIGN / 本文件，并修订「已知限制」第 2 条
+
+> **与规划的一处偏差**：规划里「文档切换含未保存内容确认」在 F5-a 未实现——本期不写盘，切换不会丢失任何已存盘内容（编辑内容仍在 localStorage 里），因此不加确认弹窗，避免每次点文件都被拦一次。这条确认应在 F5-b（真正会丢改动）时随脏标记一起做。
 
 ### 验收标准
 
@@ -667,11 +671,30 @@ F5 **不越界**：纯本地、不碰后端，与「非目标」中的「云同�
 7. 不支持该 API 的浏览器（Firefox / Safari）保持现有单文档模式，功能不退化
 8. 刷新页面后「最近打开的文件夹」入口可用，重新授权后回到原文档
 
+### 落地记录（F5-a，2026-10-13）
+
+落地文件：`index.html`（顶栏 `#btnOpenFolder` 入口 + 只读降级用的 `#folderInput` + 左侧抽屉 `#fileTreePanel`）、`css/style.css`（`/* ===== F5：文件树抽屉 =====` 段）、`js/app.js`（末尾 `// ===== F5：文件夹模式（只读）=====` 段）。**零新增依赖**——只用浏览器原生 API 与 DOM，没有引入任何树组件库。
+
+| 规划项 | 实际做法 |
+|--------|----------|
+| 三层能力降级 | ① `showDirectoryPicker` 存在 → 完整模式；② `'webkitdirectory' in input` → **只读快照模式**（`<input webkitdirectory>` 的扁平列表按 `webkitRelativePath` 补成树，节点上挂 `File` 对象）；③ 都没有 → 入口与抽屉**从 DOM 摘掉** |
+| 文件树落点 | 抽屉刻意复用 `.outline-panel` 类做骨架（`display:none` / `.show` / **打印时隐藏**三件事白拿），`.file-tree-panel` 只覆盖成「左侧通栏抽屉 + 毛玻璃 + 宽度可拖」（宽度记 `mdtu-tree-width`） |
+| 懒加载 | 只列「已展开」的目录；忽略清单 `node_modules` / `.git` / `dist` / `build` / `out` / `.next` / `.venv` / `__pycache__` / `.DS_Store`，命中即整棵剪掉；排序 = 目录在前 + `localeCompare(zh, { numeric: true })`；单目录读失败只局部标红 |
+| 文档切换 | 换 `editor.value` + `renderMarkdown()`，随后回顶 + `suppressSync()` + `saveContent()`（沿用单文档存档，刷新仍停在这篇）。**渲染层零改动** |
+| 编码 | 读侧判据提前到本期：BOM → 严格 UTF-8（`fatal: true`）→ 失败即判非 UTF-8 并回退 `TextDecoder('gbk')` 只读预览。这条同时是 F5-b 关闭写回通道的依据 |
+| 非文本文件 | 树里灰显，点了只提示不打开（本期不做「切换为隐藏」） |
+
+**顺带修掉一条既有回归（顶栏溢出）**：实测 1280px 下顶栏 `scrollWidth 1395 / clientWidth 1248`——F5 之前 `#btnExport` / `#btnCopy` 就已经在可视区外了，新增入口后又把「外链转脚注」挤了出去。改为「中间那组可横向滚动、右侧主操作永不缺席」（详见 DESIGN §5.1）。
+
+**验证**：新增回归套件 `.workbuddy/tools/fs-test.js`（**104 条**：静态源码断言 + jsdom 端到端 + 真实 Edge 几何/观感，含「代码里不得出现任何写盘 API」这条只读硬约束）。连同既有四套（95 + 87 + 58 + 225），**合计 569 条断言全绿**。
+
+**仍需人工确认的一项**：README「方式二：直接双击打开」下、**真实文件系统**里的目录选择器弹出——headless 造不出真实点击手势，本期的 C 段用打桩的假文件系统验证了逻辑与几何，但「`file://` 下真能弹出来」这一步是用户于 2026-10-13 手动确认的（见 §9.4）。
+
 ---
 
 ## F6 · 预览模式（设备档）
 
-> **状态：✅ 已实现**（2026-10-13）。落地文件：`index.html`（预览工具栏的 `#deviceGroup` 一组平铺档位按钮，`index.html:236–242`）、`css/style.css`（`/* ===== Preview Mode: 设备端 =====` 段，style.css:483 起；按钮组样式在 `.seg-btn` / `.seg-group` 处）、`js/app.js`（`// ===== Preview Mode: 设备端 =====` 段，app.js:872 起）。**零新增依赖**（档位就是原生 `<button>`，没有引入任何 UI 库）。
+> **状态：✅ 已实现**（2026-10-13）。落地文件：`index.html`（预览工具栏的 `#deviceGroup` 一组平铺档位按钮，`index.html:244–250`）、`css/style.css`（`/* ===== Preview Mode: 设备端 =====` 段，style.css:499 起；按钮组样式在 `.seg-btn` / `.seg-group` 处）、`js/app.js`（`// ===== Preview Mode: 设备端 =====` 段，app.js:872 起）。**零新增依赖**（档位就是原生 `<button>`，没有引入任何 UI 库）。
 >
 > 落地后的设计说明已并入 [DESIGN §7.9 预览模式](./DESIGN.md)；本章保留规划背景、交互取舍与实测记录。
 
