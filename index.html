@@ -459,18 +459,23 @@
         <button class="tree-btn" id="treePickBtn" data-tree-pick="1" title="选择 / 更换文件夹">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><line x1="12" y1="10.5" x2="12" y2="16.5"/><line x1="9" y1="13.5" x2="15" y2="13.5"/></svg>
         </button>
-        <button class="tree-btn" id="treeClose" title="收起文件树">&times;</button>
+        <!-- 收起：面板 + 左向箭头。「收起」不是「关闭」，所以不能用 &times; ——
+             叉号在这个位置天然被读成「关闭 / 删除」，和「把抽屉折回边缘」不是一回事。 -->
+        <button class="tree-btn" id="treeClose" title="收起文件树">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><line x1="9.5" y1="4" x2="9.5" y2="20"/><polyline points="16.5 9.5 13 12 16.5 14.5"/></svg>
+        </button>
       </span>
     </div>
     <div class="outline-body tree-body" id="fileTreeBody"></div>
     <div class="tree-resizer" id="treeResizer" title="拖动调整宽度"></div>
   </div>
 
-  <!-- 抽屉收起后的「拉出」把手：只在「已经打开过工作区 + 抽屉处于收起」时出现。
-       把「隐藏之后怎么找回来」变成一个一眼可见的动作，而不是让人记得去顶栏菜单里翻。
-       不支持文件夹 API 时与抽屉一起被摘掉。 -->
-  <button class="tree-peek" id="treePeek" hidden title="展开文件树">
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+  <!-- 抽屉收起后的入口：一枚**可拖动的悬浮球**。
+       只在「已经打开过工作区 + 抽屉处于收起」时出现 —— 把「隐藏之后怎么找回来」
+       变成一个一眼可见、还能随手挪开的动作，而不是让人记得去顶栏菜单里翻。
+       位置由 JS 写内联 left/top 并记进 localStorage；不支持文件夹 API 时与抽屉一起被摘掉。 -->
+  <button class="tree-peek" id="treePeek" hidden title="展开文件树（可拖动）" aria-label="展开文件树">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
   </button>
 
   <!-- Floating Outline Panel -->

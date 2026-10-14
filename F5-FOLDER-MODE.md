@@ -311,29 +311,34 @@ ROADMAP **F1** 中写：
 ### 6.1 目录枚举（F5-a）
 
 ```js
-// 落地形态（loadChildren(node)）：过滤与入队同层完成，不建「先全建再隐藏」
+// 落地形态（loadChildren(node)）：过滤、判空、入队同层完成，不建「先全建再隐藏」
 async function loadChildren(node) {
   const out = [];
-  let filtered = 0;
+  const budget = { n: 0 };                         // 整次调用共用的探测预算
   for await (const h of node.ref.values()) {       // values() 已实测可用
     if (shouldIgnore(h.name)) continue;
-    if (h.kind !== 'directory' && !isMdName(h.name)) { filtered++; continue; }
-    out.push(makeNode(h.name, h.kind === 'directory' ? 'dir' : 'file', joinPath(node.path, h.name), h));
-    // 子目录不在此处递归 —— 懒加载：只在用户点开时才展开
+    if (h.kind !== 'directory') {
+      if (isMdName(h.name)) out.push(makeNode(h.name, 'file', joinPath(node.path, h.name), h));
+      continue;                                    // 非 Markdown：直接丢，不入队
+    }
+    // 目录：先探一下「这棵子树里还有没有 Markdown」，没有就整条不进树
+    if (budget.n >= TREE_PROBE_MAX || await hasMarkdownDeep(h, budget)) {
+      out.push(makeNode(h.name, 'dir', joinPath(node.path, h.name), h));
+    }
   }
   sortTreeNodes(out);
-  node.children = out; node.filtered = filtered; node.loaded = true; node.error = '';
+  node.children = out; node.loaded = true; node.error = '';
 }
 ```
 
 | 设计点 | 决策 |
 |--------|------|
-| **懒加载** | 只枚举「已展开」的目录。顶层的直接子项先给，子目录点开才枚举——否则几千文件的目录会直接卡死 UI |
-| **忽略规则** | 默认 `node_modules` / `.git` / `dist` / `build` / `out` / `.next` / `.venv` / `__pycache__` / `.DS_Store`；目录名命中即整棵剪掉 |
-| **扩展名** | 白名单 `TREE_MD_EXT = ['md','markdown','mdx']`，其余文件**在枚举层就过滤掉**（不是建好再 CSS 隐藏）；目录一律保留，否则会漏掉子目录里的文档 |
-| **过滤提示** | 每个目录记一个 `filtered` 计数，渲染时在该层行首出 `filteredNoteText(n, noMd)`：「已过滤 N 个非 Markdown 文件」；该目录一个 MD 都没有时补「（无 Markdown 文档）」。**没有这条提示，用户会以为文件丢了** |
+| **懒加载** | 只把「已展开」的目录铺开，子目录点开才递归读——否则几千文件的目录会直接卡死 UI。**但为了剪掉空壳目录，枚举时会向下探一层**（见下一行） |
+| **空目录剪枝** | **整棵子树没有 Markdown 的目录连文件夹都不显示**。完整模式在 `loadChildren()` 里对每个子目录调 `hasMarkdownDeep()`：见到第一个 `.md` 立刻返回，累计扫过的条目数到 `TREE_PROBE_MAX`（1500）就一律判「有」——宁可多留一个目录，也不因为预算用尽就错杀。快照模式手里有全量列表，建完树跑一遍自下而上的 `prune()`。不再逐层报「已过滤 N 个」，打开工作区只提示一句「仅显示 Markdown 文档」 |
+| **忽略规则** | 默认 `node_modules` / `.git` / `dist` / `build` / `out` / `.next` / `.venv` / `__pycache__` / `.DS_Store`；目录名命中即整棵剪掉（**忽略发生在探测之前**，所以被忽略的目录连探都不会被探） |
+| **扩展名** | 白名单 `TREE_MD_EXT = ['md','markdown','mdx']`，其余文件**在枚举层就丢掉、不入队**（不是建好再 CSS 隐藏） |
 | **排序** | 目录在前、文件在后；同组内 `localeCompare(b, 'zh', {numeric:true})`——`numeric` 必需，否则 `第10章` 会排在 `第2章` 前面 |
-| **空目录** | 显示为 `(空)` 占位，避免看起来像加载失败 |
+| **空目录** | 剪枝之后基本走不到；真出现（打开时还有、之后被清空）就显示 `(空)` 占位，不假装里面还有东西 |
 | **超时/失败** | 单个子目录枚举失败（权限/占用）时局部标红，**不中断整棵树** |
 
 ### 6.2 文档模型与持久化（F5-b）
@@ -592,7 +597,7 @@ try {
 |---|------|----------|
 | 4 | 「打开」与「文件夹」两个顶栏按钮怎么摆 | **收进一个下拉**，菜单项改叫「**文件**」「**文件夹**」——顶栏不再横向膨胀（§11.3 / §11.5） |
 | 5 | 切换文档之后的存档 | **沿用 `saveContent()`**（写 `mdtu-content`，刷新仍停在这篇）；F5-b 再换成「按文档存取」的持久化层（§11.2） |
-| 6 | 抽屉与树的显示控制 | 抽屉要**能收也能拉回来**（菜单开关 + `×` + 左缘把手）；树要**全部展开 / 全部收起**（§11.5） |
+| 6 | 抽屉与树的显示控制 | 抽屉要**能收也能拉回来**（菜单开关 + 头部「收起」+ 收起后的悬浮球）；树要**全部展开 / 全部收起**（§11.5） |
 | 7 | 树里要不要列非 Markdown 文件 | **只列 Markdown**（`.md` / `.markdown` / `.mdx`），被过滤掉的就地报数（§11.6） |
 | 8 | 「导出 PDF」与「打印」的关系 | **拆成两个菜单项**：导出 PDF = 直接下载图片型 PDF；打印 = 浏览器打印管线（矢量、文字可选）（§11.6） |
 
@@ -641,16 +646,16 @@ try {
 
 ---
 
-## 11. 落地记录（F5-a，2026-10-13；2026-10-14 两轮修订：结构收拢 + 观感与产物）
+## 11. 落地记录（F5-a，2026-10-13；2026-10-14 三轮修订：结构收拢 + 观感与产物 + 空目录剪枝与悬浮球）
 
 ### 11.1 落地面
 
 | 文件 | 改动 |
 |------|------|
-| `index.html` | 顶栏「打开」下拉（`#openWrap` / `#btnOpen` / `#openMenu`，内含 **`#btnOpenFile`（文件）** 与 **`#btnOpenFolder`（文件夹）**；后者默认 `hidden`，能力不足时连节点一起摘掉）+ 只读降级用的 `#folderInput[webkitdirectory]` + 左侧抽屉 `#fileTreePanel`（头部 `.tree-head` = 工作区名 `#treeRoot` + 操作 `#treeExpandAll` / `#treeCollapseAll` / `#treePickBtn` / `#treeClose`）+ 抽屉收起后的左缘把手 `#treePeek` |
-| `css/style.css` | 新增 `/* ===== F5：文件树抽屉 =====` 段（复用 `.outline-panel`，覆盖成左侧毛玻璃抽屉 + 行样式 + 宽度把手 + 把手 `.tree-peek`）+ `#openWrap.single .export-caret`；**顺带修掉顶栏溢出**（见 11.3） |
-| `js/app.js` | 末尾新增 `// ===== F5：文件夹模式（只读）=====` 段（约 500 行），并在 `init()` 里调一次 `initFolderMode()`；「打开」下拉的开关逻辑在 `setOpenMenu()` 附近 |
-| `.workbuddy/tools/fs-test.js` | 新增回归套件（初版 104 条 → 结构修订后 155 条 → 观感与产物修订后 **199 条**；工具目录，不进仓库） |
+| `index.html` | 顶栏「打开」下拉（`#openWrap` / `#btnOpen` / `#openMenu`，内含 **`#btnOpenFile`（文件）** 与 **`#btnOpenFolder`（文件夹）**；后者默认 `hidden`，能力不足时连节点一起摘掉）+ 只读降级用的 `#folderInput[webkitdirectory]` + 左侧抽屉 `#fileTreePanel`（头部 `.tree-head` = 工作区名 `#treeRoot` + 操作 `#treeExpandAll` / `#treeCollapseAll` / `#treePickBtn` / `#treeClose`（图标是「面板 + 左向箭头」，不是 `×`））+ 抽屉收起后那枚**可拖动的悬浮球** `#treePeek` |
+| `css/style.css` | 新增 `/* ===== F5：文件树抽屉 =====` 段（复用 `.outline-panel`，覆盖成左侧毛玻璃抽屉 + 行样式 + 宽度拖拽把手 + 悬浮球 `.tree-peek`：44×44 正圆 + 投影 + `cursor:grab` + `.dragging` 态）+ `#openWrap.single .export-caret`；**顺带修掉顶栏溢出**（见 11.3） |
+| `js/app.js` | 末尾新增 `// ===== F5：文件夹模式（只读）=====` 段（约 550 行），并在 `init()` 里调一次 `initFolderMode()`；「打开」下拉的开关逻辑在 `setOpenMenu()` 附近；悬浮球的拖动逻辑是一段独立 IIFE（`PEEK_SIZE` / `PEEK_DRAG_SLOP` / `place()` / `persist()`） |
+| `.workbuddy/tools/fs-test.js` | 新增回归套件（初版 104 条 → 结构修订 155 条 → 观感与产物修订 199 条 → 空目录剪枝 / 悬浮球修订后 **222 条**；工具目录，不进仓库） |
 
 ### 11.2 与规划的差异（都是有意的）
 
@@ -659,7 +664,7 @@ try {
 | 只做「完整模式 + 只读降级」两层的 UI 分叉 | **只读快照模式也实现了完整交互**（`<input webkitdirectory>` 的扁平列表按 `webkitRelativePath` 补成树，叶子挂 `File` 对象） | 成本极低（三十行），却让 Firefox / Safari 用户也能用上「文件树 + 切换」，而不是完全没入口 |
 | 编码处理（§6.4）归 F5-b | **读侧判据提前到 F5-a** | 不提前做，GBK 文件在树里打开就是乱码；「严格解码失败即判非 UTF-8」这条判据同时是 F5-b 关闭写回通道的依据，先定下来更省事 |
 | §6.1 的忽略/排序/空目录/失败占位 | 全部落地 | — |
-| §6.1「非文本文件可切换为隐藏」 | **不做「可切换」**，改为**直接过滤掉非 Markdown 文件**并就地报数 | 「灰显」实测观感吵且占行；过滤 + 报数让树干净又不至于让人以为文件丢了。忽略规则的开关面板仍随 F5-c 做 |
+| §6.1「非文本文件可切换为隐藏」 | **不做「可切换」**，改为**直接过滤掉非 Markdown 文件**，并把「整棵子树没有 Markdown」的目录一并剪掉 | 「灰显」实测观感吵且占行；过滤 + 剪枝让树干净。**最初还逐层报「已过滤 N 个」，2026-10-14 晚按用户反馈取消（见 §11.7）**。忽略规则的开关面板仍随 F5-c 做 |
 | §6.7「切换文档含未保存内容确认」 | **不做确认** | 本期不写盘，切换不会丢任何已存盘内容，每次点文件都弹一次确认反而碍事；F5-b 随脏标记一起做 |
 | §6.2 的「文档 id / 草稿暂存 / 最近打开」 | **不做** | 都属于 F5-b 的持久化层；本期切换后仍走 `saveContent()` 写 `mdtu-content`，刷新停在这篇（**2026-10-14 用户确认沿用此做法**） |
 | §5.2 的「默认收起 + 可拖宽」 | 落地 | 宽度存 `mdtu-tree-width`（180–640px） |
@@ -675,15 +680,15 @@ try {
 
 ### 11.4 验证
 
-`.workbuddy/tools/fs-test.js`，本轮修订后 **199 条**：
+`.workbuddy/tools/fs-test.js`，**三轮修订后 222 条**：
 
 | 段 | 覆盖 |
 |----|------|
-| A 静态源码断言（74 条） | 入口 / 抽屉 / 三层探测 / 忽略清单 / `numeric` 排序 / 严格 UTF-8 判据 / **「代码里不得出现任何写盘 API」**（`createWritable`、`removeEntry`、`requestPermission`… 逐条断言不存在）/ 抽屉头部结构（无「文件树」标题、操作挂名字行尾、无工作区时按钮 `hidden`）/ 全树字号统一 13px / 把手几何与配色 / 只列 Markdown + 过滤提示文案 |
-| B jsdom 端到端（67 条） | 把 `showDirectoryPicker` 打桩成内存假文件系统，走真实点击路径：建树 → 懒加载（用「未展开目录的枚举次数为 0」证明）→ 展开 / 收起 → **非 Markdown 过滤（「已过滤 N 个非 Markdown 文件」文案逐字比对，含「（无 Markdown 文档）」分支）** → 切文档且预览跟随 → BOM / GBK 解码 |
-| C 真实 Edge（58 条） | 抽屉锚位（落在顶栏下方、不溢出视口、默认 264px）、毛玻璃生效、缩进随层级递增、**同级目录与文件的图标 / 文字对齐**、真实浏览器里点文件确实换正文、**顶栏按钮全在可视区内且互不重叠**、抽屉的开关 / 把手 / 全部展开收起、**把手的尺寸 / 圆角 / 配色 / 垂直居中**、**面板内四类行（头部 / 目录 / 文件 / 提示）字号完全相等**、真实浏览器里的「已过滤」提示与 `.txt` 不在树中、**两个下拉的宽度不再是 216px 且后缀紧贴文字**、导出菜单五个动作、**全屏时设备档隐藏且正文仍按当前档渲染**、打开文件不弹 Toast |
+| A 静态源码断言（89 条） | 入口 / 抽屉 / 三层探测 / 忽略清单 / `numeric` 排序 / 严格 UTF-8 判据 / **「代码里不得出现任何写盘 API」**（`createWritable`、`removeEntry`、`requestPermission`… 逐条断言不存在）/ 抽屉头部结构（无「文件树」标题、操作挂名字行尾、无工作区时按钮 `hidden`）/**「收起」不是 `×`** / 全树字号统一 13px / 只列 Markdown + `hasMarkdownDeep()` 探测与预算 + 快照 `prune()` / 悬浮球几何与拖动（指针事件、位移阈值、位置持久化、视口钳制） |
+| B jsdom 端到端（70 条） | 把 `showDirectoryPicker` 打桩成内存假文件系统，走真实点击路径：建树 → **空目录整条剪掉**（`assets` 不在树里，且**只被探过一次**）→ 探测早退（`notes` 探到 `.md` 就收手，`sub` 一次都没读）→ 展开 / 收起 → 切文档且预览跟随 → **悬浮球轻点展开 / 拖动改位置且不弹抽屉 / 位置落库** → BOM / GBK 解码 |
+| C 真实 Edge（63 条） | 抽屉锚位（落在顶栏下方、不溢出视口、默认 264px）、毛玻璃生效、缩进随层级递增、**同级目录与文件的图标 / 文字对齐**、真实浏览器里点文件确实换正文、**顶栏按钮全在可视区内且互不重叠**、抽屉的开关 / 全部展开收起、**悬浮球 44×44 正圆 / 投影 / 配色 / `cursor:grab` + 真实 `PointerEvent` 走通拖动**、**面板内四类行字号完全相等**、`.txt` 与「没有 Markdown 的目录」都不在树中、**两个下拉的宽度不再是 216px 且后缀紧贴文字**、导出菜单五个动作、**全屏时设备档隐藏且正文仍按当前档渲染**、打开文件不弹 Toast |
 
-连同既有四套（`fm-unit` 95 + `fm-e2e` 87 + `bq-test` 58 + `ex-test` 262），**合计 701 条断言，0 失败**。C 段顺带产出一张 `shots/fs-tree.png` 供人工核观感（脚本会打桩一个假文件系统，所以图上的树是构造出来的样本，不是真实磁盘）。
+连同既有四套（`fm-unit` 95 + `fm-e2e` 87 + `bq-test` 58 + `ex-test` 262），**合计 724 条断言，0 失败**。C 段顺带产出一张 `shots/fs-tree.png` 供人工核观感（脚本会打桩一个假文件系统，所以图上的树是构造出来的样本，不是真实磁盘）；截图前会把抽屉打开、树全部展开、设备档拨回 PC，让图能看清树本身。
 
 ### 11.5 修订记录（2026-10-14）
 
@@ -694,7 +699,7 @@ try {
 | 1 | 「把文件夹和打开收进下拉，并改为『文件、文件夹』」 | 新增「打开」下拉（`#openWrap`），内含「文件」「文件夹」两项，复用 `.export-*` 骨架；能力不足时只剩「文件」一项并收掉箭头 |
 | 2 | 「打开文件时不需要 toast 提示」 | 单文件打开与树里切换文档都不弹。**唯一例外**是编码：非 UTF-8（GBK 回退）/ UTF-16 只读预览时必须提示 |
 | 3 | 「全屏预览时隐藏掉设备列表，全屏时默认按当前选择的设备」 | `enterFullscreen()` 隐藏 `#previewModeGroup`；页宽组只在 PC 档出现（iPad / APP 的版心由 `--dev-max` 决定，inline `max-width` 会压掉它），非 PC 档进入时清掉遗留的 inline `max-width` 与 `page-mode`。`.device-*` class 全程不摘，所以「按当前档渲染」不需要额外代码 |
-| 4 | 「左侧文件树面板增加隐藏和显示控制」 | 三条路：菜单项开关（带 `.active`）、标题栏 `×`、**收起后左缘把手 `#treePeek`**（只在「有工作区 + 已收起」时出现） |
+| 4 | 「左侧文件树面板增加隐藏和显示控制」 | 三条路：菜单项开关（带 `.active`）、头部「收起」按钮、**收起后的悬浮球 `#treePeek`**（只在「有工作区 + 已收起」时出现）。※ 最初是贴左缘的长条把手，见 §11.7 |
 | 5 | 「文件树增加收起和展开」 | 标题栏「全部展开 / 全部收起」。收起 = 清空展开集合（不必重读盘）；展开 = 逐个读盘，`TREE_EXPAND_MAX = 400` 封顶并在到顶时如实告知，每 20 个重绘一次 |
 
 **顺带定死的一件事**：切换文档后仍调用 `saveContent()`（写 `mdtu-content`，刷新停在这篇）——用户确认沿用，F5-b 再换成工作区存档。
@@ -707,8 +712,8 @@ try {
 
 | # | 用户要求 | 落地 | 关键取舍 |
 |---|---------|------|---------|
-| 1 | 「抽屉收起时的图标调小、圆弧角、垂直居中、给个颜色，不然太不明显」 | `.tree-peek` 重写：`18×42`、`top:50%` + `translateY(-50%)`、只留右半圆角 `0 10px 10px 0`、`--accent-light` 底 + `--accent` 字，悬停加深加宽到 22px | 压在左缘的**一截**，不是一条长条；颜色让它在任何主题下都能被一眼看到 |
-| 2 | 「只展示 MD 文件，有其它格式的要提示已过滤」 | 过滤**下沉到枚举层**（`loadChildren()` / `buildSnapshotTree()` 里 `isMdName()` 不过关就 `filtered++` 且不入队）；每个目录的行首出 `filteredNoteText(n, noMd)`：「已过滤 N 个非 Markdown 文件」，该目录无 MD 时补「（无 Markdown 文档）」 | 不用「建好再 CSS 隐藏」——那样文件仍在 DOM 与内存里。`TREE_TEXT_EXT`（含 `txt`）改名 `TREE_MD_EXT` 并去掉 `txt`；目录一律保留 |
+| 1 | 「抽屉收起时的图标调小、圆弧角、垂直居中、给个颜色，不然太不明显」 | `.tree-peek` 重写：`18×42`、`top:50%` + `translateY(-50%)`、只留右半圆角 `0 10px 10px 0`、`--accent-light` 底 + `--accent` 字，悬停加深加宽到 22px | 压在左缘的**一截**，不是一条长条；颜色让它在任何主题下都能被一眼看到。※**当晚再改：换成 44×44 可拖动悬浮球（§11.7）** |
+| 2 | 「只展示 MD 文件，有其它格式的要提示已过滤」 | 过滤**下沉到枚举层**（`loadChildren()` / `buildSnapshotTree()` 里 `isMdName()` 不过关就 `filtered++` 且不入队）；每个目录的行首出 `filteredNoteText(n, noMd)`：「已过滤 N 个非 Markdown 文件」，该目录无 MD 时补「（无 Markdown 文档）」 | 不用「建好再 CSS 隐藏」——那样文件仍在 DOM 与内存里。`TREE_TEXT_EXT`（含 `txt`）改名 `TREE_MD_EXT` 并去掉 `txt`；目录一律保留。※**当晚再改：不再报数、没有 MD 的目录连文件夹都不显示（§11.7）** |
 | 3 | 「不要顶部文件树描述，操作放到文件夹名这一行尾部，字体统一」 | 删掉 `.outline-header` 那一行；头部只剩 `.tree-head`（工作区名 + 三个操作按钮 `hidden` 规则）；**全树字号统一 13px**（原 `.tree-note` / `.tree-empty` / `.tree-pick` 都是 12px，现与 `.tree-root` / `.tree-row` 同号） | 隐藏按钮用 `.tree-btn[hidden]{display:none!important}`——因为 `.tree-btn` 是 `inline-flex`，`hidden` 属性默认压不住 |
 | 4 | 「打开和导出下拉太宽，中间空白太大」 | `.export-menu` 从 `min-width: 216px` 改成 `width: max-content; min-width: 0; max-width: 260px`；`.export-item .export-ext` **去掉 `margin-left: auto`** | 真正造成中缝的是 `margin-left: auto`，不是宽度——两处都改才对；改完两个下拉实测 172–174px |
 | 5 | 「导出 PDF 现在是打印，把这俩分开：导出 PDF 是下载，打印是渲染之后的动作」 | 「导出 PDF」改走 `exportPdfFile()`（离屏渲染 → A4 切片 → JPEG → `jsPDF` → `downloadBlob()`），**点一下即下载**；另立「打印」菜单项走原 `printDocument()`（`window.print()`） | PDF 产物是图片、文字不可选，**这条写进 Toast 与 README 已知限制**；超长文档撞画布上限时明确拒绝并引导改用打印。`html2canvas` / `jspdf` 首次点击才拉，`index.html` 的常量依赖计数不变 |
@@ -716,3 +721,20 @@ try {
 **顺带**：`style.css` 打印段的注释标题从「Print / 导出 PDF」改为「Print / 打印」，并注明「导出 PDF」是另一条路、不经过 `@media print`——避免后来人误以为改打印样式会影响 PDF 下载。
 
 **本节涉及的对外表现**：导出菜单从 4 项变 5 项（复制 MD / 导出 HTML / 导出 PDF / 导出 Word / 打印），这条同时改到了 F1 的文档（README / DESIGN §7.8 / ROADMAP F1）。
+
+### 11.7 空目录剪枝与悬浮球（2026-10-14 晚，第三轮，三处）
+
+又一轮来自用户当轮反馈的修补：
+
+| # | 用户要求 | 落地 | 关键取舍 |
+|---|---------|------|---------|
+| 1 | 「加载文件夹的 toast 只说明过滤就行，无需说明过滤了多少以及哪些；树上也不要显示『已过滤 / 无文档』；**如果没有，直接文件夹也不显示**」 | ① `filtered` 计数与 `filteredNoteText()` **整条删除**（节点模型 / 渲染 / Toast 一起清）；② 打开时只提示一句「已打开文件夹：X（仅显示 Markdown 文档）」；③ 改为**剪枝**——完整模式在 `loadChildren()` 里对每个子目录调 `hasMarkdownDeep()`，快照模式建完树跑一遍自下而上的 `prune()`，**整棵子树没有 Markdown 的目录连文件夹都不显示** | **代价是有意接受的**：要让空壳目录在点开前就消失，枚举时必须向下读一层，于是「未展开的子目录一次都不枚举」这条性质不再成立。用**早退 + 预算**双保险控制成本：见到第一个 `.md` 就返回（常规文档目录只读几个条目），累计条目数到 `TREE_PROBE_MAX = 1500` 就一律判「有」——预算用尽即退回旧行为（保守保留），不会因为省事就错杀一整棵有文档的子树 |
+| 2 | 「文件树面板收起的图标改一下，现在是个 `×` 容易引起歧义」 | `#treeClose` 换成**「面板 + 左向箭头」**的 SVG（`<rect>` + 竖分隔线 + 左向 `<polyline>`） | `×` 在这个位置天然被读成「关闭 / 删除」，可它做的只是把抽屉折回边缘——不是关掉工作区。图标语义要和动作对齐 |
+| 3 | 「收起时的显示方式改为悬浮在上层的球状组件，并支持拖动」 | `.tree-peek` 从「贴左缘、18×42、只有右半圆角」改为 **44×44 正圆 + 投影 + `cursor: grab`**；指针事件拖动（`pointerdown` / `pointermove` / `pointerup` + `setPointerCapture`），`place()` 把坐标钳在视口内，位置存 `mdtu-tree-peek-pos`，`resize` 时重新钳制 | **拖动与点击必须分开**：位移小于 `PEEK_DRAG_SLOP`（4px）才算一次点击，只有点击才 `setTreePanel(true)`——否则每次把球挪开都会顺手把文件树弹出来。`touch-action: none` 让触屏上也由我们接管拖动，不被浏览器的滚动抢走 |
+
+**验证（第三轮）**：`fs-test.js` 扩到 **222 条**（静态 89 / jsdom 70 / 真实 Edge 63）。其中两处断言按新语义**改写而非删除**，因为「懒」这件事本身没变、变的只是「探一层」：
+
+- jsdom 段用假文件系统的 `__listed` 计数证明：`assets`（全是图片和 CSS，一棵子树没有 MD）**只被探过一次就整条剪掉**，从来没被当成普通目录展开；`notes` 被探时**见到第一个 `.md` 就收手**——`sub` 那会儿一次都没被读过。
+- 真实 Edge 段把「点把手展开」换成完整的指针序列：轻点（位移 0）→ 抽屉展开；再拖动 +100px → 位置变了、**抽屉没被弹出来**、`localStorage` 里落了新坐标。
+
+连同既有四套（`fm-unit` 95 + `fm-e2e` 87 + `bq-test` 58 + `ex-test` 262），**合计 724 条断言全绿**。

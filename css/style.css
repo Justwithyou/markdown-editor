@@ -1170,7 +1170,7 @@ body {
   text-overflow: ellipsis;
 }
 
-/* 空目录 / 加载中 / 读取失败 / 过滤提示：各占一行，别让树看起来像断了。
+/* 空目录 / 加载中 / 读取失败：各占一行，别让树看起来像断了。
    字号与文件行一致（13px），只有颜色和斜体把它和可点的行区分开。 */
 .tree-note {
   padding: 3px 10px;
@@ -1181,12 +1181,6 @@ body {
 
 .tree-note.tree-error {
   color: var(--danger);
-}
-
-/* 「已过滤 N 个非 Markdown 文件」——磁盘上确实有、树上确实没有，
-   不说清楚就会被当成 bug，所以用正常体（不是斜体）让它读起来像一句提示。 */
-.tree-note.tree-filtered {
-  font-style: normal;
 }
 
 .tree-empty {
@@ -1226,34 +1220,44 @@ body {
   display: none !important;
 }
 
-/* 抽屉收起后的把手：贴左缘的一小片圆角，**垂直居中**。
-   收起后它是唯一一眼可见的入口，所以不再用一片灰毛玻璃（太容易被当成装饰），
-   改成主题色的浅底 + 主题色图标；hover 时才填满主题色。 */
+/* 抽屉收起后的入口：一枚**可拖动的悬浮球**（44×44，圆形，主题色 + 投影）。
+   原先贴左缘的长条容易被当成页面装饰，也让「收起之后怎么找回」不够显眼；
+   圆球一眼就是「能点的东西」，而且可以拖开 —— 不挡正文。
+   left / top 由 JS 内联写入（拖动 + 位置持久化 + 视口钳制），这里只定形状与观感。 */
 .tree-peek {
   position: fixed;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
+  left: 12px;
+  top: calc(50% - 22px);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 42px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border: 1px solid var(--accent-light);
-  border-left: none;
-  border-radius: 0 10px 10px 0;
+  border-radius: 50%;
   background: var(--accent-light);
   color: var(--accent);
-  cursor: pointer;
+  cursor: grab;
   z-index: 790;
-  transition: width .15s ease, background .15s ease, color .15s ease;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .16);
+  touch-action: none;   /* 触屏上由我们接管拖动，别让浏览器抢去做滚动 */
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background .15s ease, color .15s ease, box-shadow .15s ease;
 }
 
 .tree-peek:hover {
-  width: 22px;
   background: var(--accent);
   color: #ffffff;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .22);
+}
+
+/* 拖动中：去掉过渡（跟手），光标换成「抓着」 */
+.tree-peek.dragging {
+  cursor: grabbing;
+  transition: none;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .28);
 }
 
 .tree-peek[hidden] {

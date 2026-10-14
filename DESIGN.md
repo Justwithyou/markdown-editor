@@ -52,12 +52,12 @@
 
 ```
 mdtu-editor/
-├── index.html        # 页面结构 + CDN 依赖引入 + 图标声明（490 行）
+├── index.html        # 页面结构 + CDN 依赖引入 + 图标声明（495 行）
 ├── Markdown.ico      # 站点图标，六帧（16/32/48/64/128/256）；页头 / 标签页 / 桌面快捷方式共用
 ├── css/
-│   └── style.css     # 全部样式：2 套主题 + 布局 + 弹窗 + 水印 + 元数据 + 设备档预览 + 文件树抽屉 + 打开与导出下拉 + 打印（1712 行）
+│   └── style.css     # 全部样式：2 套主题 + 布局 + 弹窗 + 水印 + 元数据 + 设备档预览 + 文件树抽屉 + 打开与导出下拉 + 打印（1716 行）
 ├── js/
-│   └── app.js        # 全部逻辑：解析/渲染/大纲/水印/模板/元数据/复制/导出/导出 PDF/设备档预览/文件夹模式（2928 行）
+│   └── app.js        # 全部逻辑：解析/渲染/大纲/水印/模板/元数据/复制/导出/导出 PDF/设备档预览/文件夹模式（3034 行）
 ├── README.md         # 项目说明（GitHub 标准格式）
 ├── ROADMAP.md        # 未来功能升级路线（独立文档）
 ├── DESIGN.md         # 本文档
@@ -183,7 +183,7 @@ preview.innerHTML = html  ← 写入预览区
 | `#linksModal` | 760px (modal-lg) | 工具/开源项目导航（三 Tab） |
 | `#watermarkModal` | 680px (modal-md) | 水印设置（左表单 + 右预览） |
 
-另有悬浮组件：文档大纲 `.outline-panel`（右侧垂直居中悬浮）、**文件树抽屉 `.file-tree-panel`**（左侧，F5，见 7.10）、**抽屉把手 `.tree-peek`**（抽屉收起后贴左缘的一小条，只在「有工作区 + 抽屉收起」时出现；`position: fixed`，避开 `.app-main` 的 flex）、Toast 提示 `.toast`。
+另有悬浮组件：文档大纲 `.outline-panel`（右侧垂直居中悬浮）、**文件树抽屉 `.file-tree-panel`**（左侧，F5，见 7.10）、**抽屉入口 `.tree-peek`**（抽屉收起后浮在内容上层的 44×44 主题色圆球，可拖动、位置记在 `mdtu-tree-peek-pos`，只在「有工作区 + 抽屉收起」时出现）、Toast 提示 `.toast`。
 
 ---
 
@@ -455,11 +455,11 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 | ② | `'webkitdirectory' in input` | 只读快照模式：`<input webkitdirectory>` 给的扁平文件列表，按 `webkitRelativePath` 补出树 |
 | ③ | 都不成立（Firefox / Safari） | **入口与抽屉整块从 DOM 摘掉**，退回单文档模式 |
 
-**节点模型**：`{ name, kind, path, ref, children, loaded, loading, error, filtered }`。`path` 是工作区内的相对路径，同时充当文档 id；`ref` 在完整模式下是 `FileSystemHandle`、在快照模式下是 `File` 对象；`children === null` 表示「还没枚举过」，空数组才是「真的是空目录」；`filtered` 记录**这个目录下被过滤掉多少个非 Markdown 文件**，用于就地报数。
+**节点模型**：`{ name, kind, path, ref, children, loaded, loading, error }`。`path` 是工作区内的相对路径，同时充当文档 id；`ref` 在完整模式下是 `FileSystemHandle`、在快照模式下是 `File` 对象；`children === null` 表示「还没枚举过」，空数组才是「真的是空目录」。
 
-**枚举是懒的**：只列「已展开」的目录（`loadChildren()` 里的 `for await (const h of node.ref.values())`），子目录点开才读——不这么做，几千文件的目录会直接卡死 UI。默认忽略 `node_modules` / `.git` / `dist` / `build` / `out` / `.next` / `.venv` / `__pycache__` / `.DS_Store`，命中即整棵剪掉；排序是「目录在前、文件在后」+ `localeCompare(zh, { numeric: true })`（`numeric` 必需，否则 `第10章` 会排到 `第2章` 前面）。单个子目录读失败只局部标红，**不中断整棵树**。
+**枚举是懒的，但为了剪掉空壳目录会往下探一层。** 真正把子项铺开只发生在「已展开」的目录（`loadChildren()` 里的 `for await (const h of node.ref.values())`），子目录点开才递归读——不这么做，几千文件的目录会直接卡死 UI。但「这个目录里到底有没有文档」得先知道，才谈得上不显示它，所以 `loadChildren()` 会对每个子目录调一次 `hasMarkdownDeep()`：**见到第一个 `.md` 立刻返回**（常规文档目录只读几个条目），并带 `TREE_PROBE_MAX` 预算——累计扫过的条目数到顶就一律判「有」，宁可多留一个目录，也不因为预算用尽就错杀一整棵有文档的子树。默认忽略 `node_modules` / `.git` / `dist` / `build` / `out` / `.next` / `.venv` / `__pycache__` / `.DS_Store`，命中即整棵剪掉；排序是「目录在前、文件在后」+ `localeCompare(zh, { numeric: true })`（`numeric` 必需，否则 `第10章` 会排到 `第2章` 前面）。单个子目录读失败只局部标红，**不中断整棵树**。
 
-**只展示 Markdown，且被过滤的要报数。** 树的构建把过滤**放在枚举层**（`loadChildren()` 里 `isMdName()` 不过关就 `filtered++` 且不入队），快照模式同理由 `buildSnapshotTree()` 处理——不是「先建好再 CSS 隐藏」。白名单是 `TREE_MD_EXT = ['md','markdown','mdx']`；目录一律保留（否则会漏掉子目录里的文档）。每个含被过滤文件的目录，都会在该层行首渲染一条 `filteredNoteText(n, noMd)`：常态是「已过滤 N 个非 Markdown 文件」，若该目录**一个 MD 都没有**则补成「已过滤 N 个非 Markdown 文件（无 Markdown 文档）」。没有这条提示，用户会以为文件丢了。打开工作区那一刻也会在根节点下汇总一条同样的提示。
+**只展示 Markdown，没有文档的目录整条不进树。** 树的构建把过滤**放在枚举层**（`loadChildren()` 里 `isMdName()` 不过关直接丢掉、不入队），快照模式同理由 `buildSnapshotTree()` 处理——不是「先建好再 CSS 隐藏」。白名单是 `TREE_MD_EXT = ['md','markdown','mdx']`。**目录不再「一律保留」**：完整模式靠 `hasMarkdownDeep()` 逐个子目录探（见上段），快照模式在建完树后自下而上跑一遍 `prune()`，两边都做到「**整棵子树没有 Markdown ⇒ 连文件夹都不显示**」。之所以不留空目录，是因为一个「点开才发现里面是空的」壳子比干脆不显示更让人困惑；同理也不再逐层报「已过滤 N 个非 Markdown 文件」，打开工作区时只提示一句「仅显示 Markdown 文档」。
 
 **切换文档 = 换 `editor.value` + 调一次 `renderMarkdown()`**：换完把两个滚动容器显式拉回顶部并 `suppressSync()`，再 `saveContent()` 沿用单文档那套存档（刷新后仍停在这篇）。
 
@@ -467,9 +467,9 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 
 **UI 复用**：抽屉刻意带上 `.outline-panel` 类——浮层骨架、`.show` 切换、**打印时隐藏**三件事都由那一套既有规则承担，`.file-tree-panel` 只把它从「右侧居中浮层」改成「左侧通栏抽屉」（毛玻璃 + 宽度拖拽，宽度记在 `mdtu-tree-width`）。文件行会占住折叠箭头那一列（空槽），否则同级目录与文件的图标 / 文字会左右错开。
 
-**抽屉头部不再单占一行标题。** 早先的版本是 `.outline-header`「文件树…」+ 下面一行工作区名，两行都占地方，字号还和树内容不一致。现在头部只有一个 `.tree-head`：左边 `.tree-root`（工作区名，13px / 600 粗）+ `.tree-mode`（快照模式标签），右边 `.tree-head-actions` 里四个 24×24 的 `.tree-btn`（全部展开 / 全部收起 / 换文件夹 / 收起 `×`）。**全树字号统一 13px**：`.tree-head` / `.tree-root` / `.tree-mode` / `.tree-row` / `.tree-note` / `.tree-empty` / `.tree-pick` 同一档，不再有大有小。没有工作区时三个操作按钮 `hidden`（`.tree-btn[hidden]{display:none!important}`）。
+**抽屉头部不再单占一行标题。** 早先的版本是 `.outline-header`「文件树…」+ 下面一行工作区名，两行都占地方，字号还和树内容不一致。现在头部只有一个 `.tree-head`：左边 `.tree-root`（工作区名，13px / 600 粗）+ `.tree-mode`（快照模式标签），右边 `.tree-head-actions` 里四个 24×24 的 `.tree-btn`（全部展开 / 全部收起 / 换文件夹 / **收起**）。最后一个刻意**不用 `×`**，而是「面板 + 左向箭头」——`×` 在这个位置会被读成「关闭 / 删除」，可它做的只是把抽屉折回边缘，不是关掉工作区。**全树字号统一 13px**：`.tree-head` / `.tree-root` / `.tree-mode` / `.tree-row` / `.tree-note` / `.tree-empty` / `.tree-pick` 同一档，不再有大有小。没有工作区时三个操作按钮 `hidden`（`.tree-btn[hidden]{display:none!important}`）。
 
-**抽屉的显示 / 隐藏有三条路，各司其职。** ① 顶栏「打开 → 文件夹」那一项本身就是**开关**（展开时带 `.active` 激活态）；② 抽屉头部的 `×` 收起它；③ **抽屉收起后，左缘留一个把手 `.tree-peek`**（`position: fixed; top: 50%; transform: translateY(-50%)`，贴左缘、18×42、只有右半圆角 `0 10px 10px 0`，主题色 `--accent-light` 底 + `--accent` 字，悬停加深加宽），点一下把它拉回来。第 ③ 条只在「**已经打开过工作区 + 抽屉处于收起**」时露出——还没选过目录时那个位置就空着（入口在顶栏菜单里，不需要第二个）。这条是为了把「隐藏之后怎么找回来」变成一个一眼可见的动作，而不是让人记得去菜单里翻。
+**抽屉的显示 / 隐藏有三条路，各司其职。** ① 顶栏「打开 → 文件夹」那一项本身就是**开关**（展开时带 `.active` 激活态）；② 抽屉头部的「收起」按钮把它折回边缘；③ **抽屉收起后，留一枚悬浮球 `.tree-peek`**——`position: fixed`、`z-index: 790`，44×44 正圆、`--accent-light` 底 + `--accent` 字、带投影（主题色 + 投影 = 一眼看出「这是个能点、能挪的东西」）。它用**指针事件**实现拖动：`pointerdown` 记起点、`pointermove` 写内联 `left/top`（`place()` 把坐标钳在视口内）、`pointerup` 落库；**位移小于 `PEEK_DRAG_SLOP`（4px）才算一次点击**，只有点击才展开抽屉——否则每次把球挪开都会顺手把文件树弹出来。位置存 `mdtu-tree-peek-pos`，`resize` 时重新钳制一次，免得窗口变小后球被留在视口外。第 ③ 条只在「**已经打开过工作区 + 抽屉处于收起**」时露出——还没选过目录时那个位置就空着（入口在顶栏菜单里，不需要第二个）。这条是为了把「隐藏之后怎么找回来」变成一个一眼可见、还能随手挪开的动作，而不是让人记得去菜单里翻。
 
 **「全部展开 / 全部收起」是两件不同的事。** 收起只是 `treeState.expanded.clear()`（清空展开集合，树的 `children` 留着，重新展开不必再读盘）。展开则要**逐个目录读盘**——懒加载的树一旦全展开，等于把整棵目录树读进内存，几千文件的目录会直接拖死 UI，所以 `TREE_EXPAND_MAX = 400` 封顶：到顶就停手并 `showToast('目录较多，只展开了前 400 个')`，而不是假装展完了。读盘过程中每 20 个目录重绘一次（每个都重绘会把整趟遍历拖慢一个量级），并用 `treeExpanding` 防止重复点击叠加。
 
@@ -525,6 +525,7 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 | `mdtu-fs-width` | 全屏页宽 |
 | `mdtu-device` | 预览设备档（`pc` / `ipad` / `app`） |
 | `mdtu-tree-width` | 文件树抽屉宽度（180–640px） |
+| `mdtu-tree-peek-pos` | 收起后悬浮球的位置（JSON `{ x, y }`，视口内钳制） |
 | `mdtu-frontmatter` | 元数据展示方式（`panel` / `codeBlock` / `hide`，旧值 `table` 读取时自动迁移） |
 
 > 早先还有一个 `mdtu-platform`（展示端）。平台维度并入设备档后，`init()` 会主动把它从 localStorage 里 `removeItem` 清掉。

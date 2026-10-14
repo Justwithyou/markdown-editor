@@ -2388,6 +2388,12 @@ img { max-width: 100%; }`;
   // 命中即整棵剪掉 —— 不忽略的话，树会被依赖目录与产物淹没
   const TREE_IGNORE = ['node_modules', '.git', 'dist', 'build', 'out', '.next', '.venv', '__pycache__', '.DS_Store'];
   const TREE_W_KEY = 'mdtu-tree-width';
+  const TREE_PEEK_KEY = 'mdtu-tree-peek-pos';
+
+  // 「这棵子树里到底还有没有 Markdown」的探测预算。
+  // 没有 Markdown 的目录整条不进树，但探测是要读盘的：累计扫过的条目数一旦超过这个数，
+  // 就不再深挖、一律判定为「有」——宁可多留一个目录，也不因为预算用尽就错杀有文档的子树。
+  const TREE_PROBE_MAX = 1500;
 
   const ICON_CARET = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="9 6 15 12 9 18"/></svg>';
   const ICON_DIR = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
@@ -2402,10 +2408,11 @@ img { max-width: 100%; }`;
   const treeResizer = $('#treeResizer');
   const treePeek = $('#treePeek');
 
-  // 树节点 = { name, kind:'dir'|'file', path, ref, children, loaded, loading, error, filtered }
+  // 树节点 = { name, kind:'dir'|'file', path, ref, children, loaded, loading, error }
   // ref 在完整模式下是 FileSystemHandle，在只读快照模式下是 File 对象。
   // children === null 表示「还没枚举过」，空数组才是「真的是空目录」——两者不能混。
-  // filtered = 这一层被过滤掉的非 Markdown 文件数（0 表示没有东西被藏起来）。
+  // 非 Markdown 文件在枚举时就被丢掉；**整棵子树都没有 Markdown 的目录同样不进树**
+  // （见 hasMarkdownDeep），所以树上不会出现「点开才发现里面是空的」这种壳子。
   const treeState = {
     cap: FOLDER_CAP,
     mode: FOLDER_CAP === 'pick' ? 'pick' : (FOLDER_CAP === 'snapshot' ? 'snapshot' : ''),
@@ -2426,7 +2433,7 @@ img { max-width: 100%; }`;
   function makeNode(name, kind, path, ref) {
     return {
       name: name, kind: kind, path: path, ref: ref || null,
-      children: null, loaded: false, loading: false, error: '', filtered: 0,
+      children: null, loaded: false, loading: false, error: '',
     };
   }
 
@@ -2439,29 +2446,52 @@ img { max-width: 100%; }`;
     });
   }
 
+  // 「这棵子树里还有没有 Markdown」——没有就整条不进树。
+  // 早退：见着第一个 .md 立刻返回 true，所以常规文档目录只读几个条目。
+  // budget 是整次 loadChildren 共用的计数器（跨子目录累计），用尽后一律判 true——
+  // 宁可多留一个目录，也不因为预算用完就错杀一整棵有文档的子树。
+  async function hasMarkdownDeep(dirHandle, budget) {
+    let entries;
+    try { entries = dirHandle.values(); } catch (err) { return true; }
+    for await (const h of entries) {
+      if (shouldIgnore(h.name)) continue;
+      if (budget.n++ >= TREE_PROBE_MAX) return true;
+      if (h.kind === 'directory') {
+        if (await hasMarkdownDeep(h, budget)) return true;
+      } else if (isMdName(h.name)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // 只枚举一层，子目录等用户点开时才读（懒加载）——
   // 一次把整棵树铺开，几千文件的目录会直接卡死 UI。
-  // 顺便把「这一层被过滤掉几个非 Markdown 文件」数出来，挂回节点上。
+  // 每个子目录先探一下「里面还有没有 Markdown」，没有就不放进 out。
   // 结果直接写进 node，调用方不用再赋值 —— 三个调用点（点开目录 / 全部展开 / 选目录）
-  // 都要同时维护 children / loaded / error / filtered 四件事，散在外面迟早漏一个。
+  // 都要同时维护 children / loaded / error 三件事，散在外面迟早漏一个。
   async function loadChildren(node) {
     const out = [];
-    let filtered = 0;
+    const budget = { n: 0 };
     for await (const h of node.ref.values()) {
       if (shouldIgnore(h.name)) continue;
-      if (h.kind !== 'directory' && !isMdName(h.name)) { filtered++; continue; }
-      out.push(makeNode(h.name, h.kind === 'directory' ? 'dir' : 'file', joinPath(node.path, h.name), h));
+      if (h.kind !== 'directory') {
+        if (isMdName(h.name)) out.push(makeNode(h.name, 'file', joinPath(node.path, h.name), h));
+        continue;
+      }
+      if (budget.n >= TREE_PROBE_MAX || await hasMarkdownDeep(h, budget)) {
+        out.push(makeNode(h.name, 'dir', joinPath(node.path, h.name), h));
+      }
     }
     sortTreeNodes(out);
     node.children = out;
-    node.filtered = filtered;
     node.loaded = true;
     node.error = '';
   }
 
   // 只读降级：<input webkitdirectory> 给的是一份扁平文件列表（带 webkitRelativePath），
   // 拿不到目录句柄，这里按路径把树补出来，File 对象挂在叶子上。
-  // 过滤规则与完整模式一致：非 Markdown 文件不进树，但逐层记下被过滤掉的数量。
+  // 过滤规则与完整模式一致：非 Markdown 文件不进树，整棵没有 Markdown 的目录也不进。
   function buildSnapshotTree(files) {
     const rootName = ((files[0].webkitRelativePath || '').split('/')[0]) || '工作区';
     const root = makeNode(rootName, 'dir', '', null);
@@ -2489,31 +2519,31 @@ img { max-width: 100%; }`;
         dir = next;
       }
       const leaf = parts[parts.length - 1];
-      if (!isMdName(leaf)) { dir.filtered++; return; }
+      if (!isMdName(leaf)) return;
       dir.children.push(makeNode(leaf, 'file', joinPath(dir.path, leaf), file));
     });
 
-    (function sortDeep(node) {
+    // 快照模式手里有全量文件列表，所以能做「一次到底」的剪枝：自下而上把空目录摘掉再排序。
+    // pick 模式做不到这一步（子目录内容要读了才知道），只能靠 hasMarkdownDeep 探。
+    (function prune(node) {
+      node.children = node.children.filter(function (c) {
+        if (c.kind !== 'dir') return true;
+        prune(c);
+        return c.children.length > 0;
+      });
       sortTreeNodes(node.children);
-      node.children.forEach(function (c) { if (c.kind === 'dir') sortDeep(c); });
     })(root);
     return root;
   }
 
   // ----- 渲染 -----
 
-  function noteRow(text, depth, isError, extraClass) {
+  function noteRow(text, depth, isError) {
     const el = document.createElement('div');
-    el.className = 'tree-note' + (isError ? ' tree-error' : '') + (extraClass ? ' ' + extraClass : '');
+    el.className = 'tree-note' + (isError ? ' tree-error' : '');
     el.style.paddingLeft = (10 + depth * 13) + 'px';
     el.textContent = text;
     return el;
-  }
-
-  // 「已过滤 N 个非 Markdown 文件」的文案只有一个出口：
-  // 一个只剩非 Markdown 文件的目录，和被过滤掉一部分的目录，用的是同一句话加个后缀。
-  function filteredNoteText(n, noMd) {
-    return '已过滤 ' + n + ' 个非 Markdown 文件' + (noMd ? '（无 Markdown 文档）' : '');
   }
 
   function buildRow(node, depth) {
@@ -2550,13 +2580,9 @@ img { max-width: 100%; }`;
     return row;
   }
 
-  // depth 是「这一层子项的缩进级别」，所以 node.filtered 的提示与它自己的子项同缩进。
-  // 过滤提示放在这一块的最前面：展开就看得见 —— 滚到列表底部才发现等于没提示。
+  // depth 是「这一层子项的缩进级别」。
   function appendRows(node, depth, frag) {
     const kids = node.children || [];
-    if (node.filtered) {
-      frag.appendChild(noteRow(filteredNoteText(node.filtered, !kids.length), depth, false, 'tree-filtered'));
-    }
     if (!kids.length) return;
 
     kids.forEach(function (child) {
@@ -2566,11 +2592,10 @@ img { max-width: 100%; }`;
       if (child.loading) { frag.appendChild(noteRow('加载中…', depth + 1)); return; }
       if (child.error) { frag.appendChild(noteRow('读取失败：' + child.error, depth + 1, true)); return; }
 
-      // 空目录要分清「真的空」与「里面的东西被过滤光了」——后者是过滤造成的，必须说出来
       if (child.children && child.children.length) { appendRows(child, depth + 1, frag); return; }
-      frag.appendChild(child.filtered
-        ? noteRow(filteredNoteText(child.filtered, true), depth + 1, false, 'tree-filtered')
-        : noteRow('(空)', depth + 1));
+      // 枚举时已经剪过一遍，走到这里只可能是「刚打开时还有、现在被清空了」——
+      // 留一行占位，不假装它里面有东西
+      frag.appendChild(noteRow('(空)', depth + 1));
     });
   }
 
@@ -2592,7 +2617,7 @@ img { max-width: 100%; }`;
         '<button type="button" class="btn-primary tree-pick" data-tree-pick="1">选择文件夹…</button>' +
         '<p>打开后可以逐个浏览目录里的文档，点一下就切换。<br>只展示 Markdown 文档（' +
         TREE_MD_EXT.map(function (e) { return '.' + e; }).join(' / ') +
-        '），其余文件会被过滤掉并单独说明。<br>本期为只读：不会改动磁盘上的任何文件。</p>' +
+        '），其余文件不进树，没有文档的目录也不会出现。<br>本期为只读：不会改动磁盘上的任何文件。</p>' +
         '</div>';
       return;
     }
@@ -2630,7 +2655,7 @@ img { max-width: 100%; }`;
     treeState.visible = show;
     treePanel.classList.toggle('show', show);
     if (btnOpenFolder) btnOpenFolder.classList.toggle('active', show);
-    // 把手只在「已经打开过工作区 + 抽屉处于收起」时露出来；
+    // 悬浮球只在「已经打开过工作区 + 抽屉处于收起」时露出来；
     // 还没选过文件夹时不占地方（那会儿入口就在顶栏菜单里，不需要第二个）
     if (treePeek) treePeek.hidden = !(!show && treeState.root);
     if (show) renderTree();
@@ -2798,14 +2823,7 @@ img { max-width: 100%; }`;
     }
     treeState.root.loading = false;
     renderTree();
-    showToast('已打开文件夹：' + handle.name + rootFilterNote(treeState.root));
-  }
-
-  // 打开文件夹时顺带说一句「过滤掉了多少」，不然一进去就少一堆文件会让人以为出错了。
-  // 只报顶层这一次：往下钻的目录各自有就地提示（见 appendRows），不必重复。
-  function rootFilterNote(root) {
-    if (!root || !root.filtered) return '';
-    return '（已过滤 ' + root.filtered + ' 个非 Markdown 文件）';
+    showToast('已打开文件夹：' + handle.name + '（仅显示 Markdown 文档）');
   }
 
   // 「选择文件夹」在两种能力下走两条通道：完整模式有目录句柄，快照模式只能借 input
@@ -2823,7 +2841,7 @@ img { max-width: 100%; }`;
     treeState.currentPath = '';
     treeState.expanded.clear();
     setTreePanel(true);
-    showToast('已打开文件夹：' + treeState.root.name + '（只读快照）' + rootFilterNote(treeState.root));
+    showToast('已打开文件夹：' + treeState.root.name + '（只读快照，仅显示 Markdown 文档）');
   }
 
   function onTreeRowClick(row) {
@@ -2872,6 +2890,95 @@ img { max-width: 100%; }`;
     if (!isNaN(w)) { try { localStorage.setItem(TREE_W_KEY, String(w)); } catch (e) {} }
   });
 
+  // ----- 收起后的悬浮球：拖动改位置，轻点展开抽屉 -----
+  // 「拖动」与「点击」靠位移阈值区分：指针抬起时总位移小于 PEEK_DRAG_SLOP 才算一次点击。
+  // 不这么做的话，每次把球挪开都会顺手把抽屉弹出来。
+  const PEEK_SIZE = 44;
+  const PEEK_DRAG_SLOP = 4;
+
+  (function initTreePeek() {
+    if (!treePeek) return;
+
+    function place(x, y) {
+      const w = window.innerWidth || document.documentElement.clientWidth || 0;
+      const h = window.innerHeight || document.documentElement.clientHeight || 0;
+      // 钳在视口内 —— 存下来的位置可能来自一个更大 / 更小的窗口
+      const nx = Math.min(Math.max(x, 8), Math.max(8, w - PEEK_SIZE - 8));
+      const ny = Math.min(Math.max(y, 8), Math.max(8, h - PEEK_SIZE - 8));
+      treePeek.style.left = nx + 'px';
+      treePeek.style.top = ny + 'px';
+    }
+
+    function readPos() {
+      return { x: parseFloat(treePeek.style.left), y: parseFloat(treePeek.style.top) };
+    }
+
+    function persist() {
+      const p = readPos();
+      if (isNaN(p.x) || isNaN(p.y)) return;
+      try { localStorage.setItem(TREE_PEEK_KEY, JSON.stringify({ x: p.x, y: p.y })); } catch (e) {}
+    }
+
+    (function restore() {
+      let saved = null;
+      try { saved = JSON.parse(localStorage.getItem(TREE_PEEK_KEY) || 'null'); } catch (e) {}
+      if (saved && typeof saved.x === 'number' && typeof saved.y === 'number') {
+        place(saved.x, saved.y);
+        return;
+      }
+      // 默认贴左缘、垂直居中 —— 与从前那片把手同一个位置，只是换成了球
+      const h = window.innerHeight || document.documentElement.clientHeight || 0;
+      place(12, (h - PEEK_SIZE) / 2);
+    })();
+
+    window.addEventListener('resize', function () {
+      const p = readPos();
+      if (!isNaN(p.x) && !isNaN(p.y)) place(p.x, p.y);
+    });
+
+    let dragging = false;
+    let moved = false;
+    let startX = 0, startY = 0, baseX = 0, baseY = 0;
+
+    treePeek.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      const p = readPos();
+      dragging = true;
+      moved = false;
+      startX = e.clientX;
+      startY = e.clientY;
+      baseX = isNaN(p.x) ? 0 : p.x;
+      baseY = isNaN(p.y) ? 0 : p.y;
+      treePeek.classList.add('dragging');
+      try { treePeek.setPointerCapture(e.pointerId); } catch (err) {}
+      e.preventDefault();
+    });
+
+    treePeek.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (!moved && Math.abs(dx) + Math.abs(dy) < PEEK_DRAG_SLOP) return;
+      moved = true;
+      place(baseX + dx, baseY + dy);
+    });
+
+    function endDrag(e) {
+      if (!dragging) return;
+      dragging = false;
+      treePeek.classList.remove('dragging');
+      try { if (e && e.pointerId != null) treePeek.releasePointerCapture(e.pointerId); } catch (err) {}
+      if (moved) persist();
+    }
+
+    treePeek.addEventListener('pointerup', function (e) {
+      const wasMoved = moved;
+      endDrag(e);
+      if (!wasMoved) setTreePanel(true);
+    });
+    treePeek.addEventListener('pointercancel', endDrag);
+  })();
+
   // 能力不够时把入口与抽屉整块摘掉，而不是渲染出来再报错
   function initFolderMode() {
     if (FOLDER_CAP === 'none') {
@@ -2886,7 +2993,7 @@ img { max-width: 100%; }`;
     treeModeEl.textContent = FOLDER_CAP === 'snapshot' ? '只读' : '';
 
     // 抽屉的显示 / 隐藏有两条路：顶栏菜单里那一项是开关（展开时带激活态），
-    // 抽屉自己的「收起」与左缘把手都能把它收掉 / 拉回来 —— 后者是收起后唯一一眼可见的入口。
+    // 抽屉自己的「收起」与那枚悬浮球都能把它收掉 / 拉回来 —— 后者是收起后唯一一眼可见的入口。
     btnOpenFolder.addEventListener('click', function () {
       setOpenMenu(false);
       setTreePanel(!treeState.visible);
@@ -2894,7 +3001,6 @@ img { max-width: 100%; }`;
     $('#treeClose').addEventListener('click', function () { setTreePanel(false); });
     $('#treeExpandAll').addEventListener('click', function () { expandAll(); });
     $('#treeCollapseAll').addEventListener('click', function () { collapseAll(); });
-    if (treePeek) treePeek.addEventListener('click', function () { setTreePanel(true); });
     folderInput.addEventListener('change', onFolderInputChange);
     renderTree();
   }
