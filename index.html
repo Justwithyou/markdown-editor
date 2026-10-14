@@ -132,15 +132,22 @@
             <span>导出 HTML</span>
             <span class="export-ext">.html</span>
           </button>
-          <button class="export-item" role="menuitem" data-export="pdf" title="通过打印对话框另存为 PDF">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8" rx="1"/></svg>
+          <button class="export-item" role="menuitem" data-export="pdf" title="把当前文档渲染成 PDF 文件并下载（图片版）">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h1.6a1.4 1.4 0 0 1 0 2.8H8V13zM8 18.6V15.8"/><path d="M13 13h1.2a1.6 1.6 0 0 1 0 3.2H13V13zM13 19v-2.8"/><path d="M17.6 13h1.9M17.6 13v6M17.6 15.8h1.6"/></svg>
             <span>导出 PDF</span>
-            <span class="export-ext">打印</span>
+            <span class="export-ext">.pdf</span>
           </button>
           <button class="export-item" role="menuitem" data-export="word" title="导出为 Word 文档（.doc，HTML 套壳）">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M8.5 12.5l1.4 5.5 2.1-4 2.1 4 1.4-5.5"/></svg>
             <span>导出 Word</span>
             <span class="export-ext">.doc</span>
+          </button>
+          <!-- 打印与上面的「导出 PDF」是两件事：导出走渲染 → 下载文件；
+               打印走浏览器打印管线（矢量、文字可选中、可另存为 PDF），不改磁盘也不落文件 -->
+          <button class="export-item" role="menuitem" data-export="print" title="用浏览器打印（可打印纸张，也可在对话框里另存为 PDF）">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8" rx="1"/></svg>
+            <span>打印</span>
+            <span class="export-ext">Ctrl+P</span>
           </button>
         </div>
       </div>
@@ -433,21 +440,26 @@
 
   <!-- F5 文件树抽屉。
        class 里刻意带上 .outline-panel：浮层骨架、.show 切换、打印时隐藏这三件事
-       都由那一套既有样式承担，样式表里只把它从「右侧居中浮层」改成「左侧通栏抽屉」。 -->
+       都由那一套既有样式承担，样式表里只把它从「右侧居中浮层」改成「左侧通栏抽屉」。
+       顶部那一行**不是「文件树」标题**，而是「工作区名字 + 操作」：操作跟着它自己的名字走，
+       不必单独占一行标题栏。没有工作区时这一行只剩「收起」（#treeRoot 为空、三个树操作隐藏）。 -->
   <div class="outline-panel file-tree-panel" id="fileTreePanel">
-    <div class="outline-header">
-      <span>文件树<span class="tree-mode" id="treeMode"></span></span>
+    <div class="tree-head" id="treeHead">
+      <span class="tree-head-title">
+        <span class="tree-root" id="treeRoot"></span>
+        <span class="tree-mode" id="treeMode"></span>
+      </span>
       <span class="tree-head-actions">
-        <button class="outline-close" id="treeExpandAll" title="全部展开">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 9 12 4 17 9"/><polyline points="7 15 12 20 17 15"/></svg>
+        <button class="tree-btn" id="treeExpandAll" title="全部展开">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 9 12 4 17 9"/><polyline points="7 15 12 20 17 15"/></svg>
         </button>
-        <button class="outline-close" id="treeCollapseAll" title="全部收起">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 4 12 9 17 4"/><polyline points="7 20 12 15 17 20"/></svg>
+        <button class="tree-btn" id="treeCollapseAll" title="全部收起">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 4 12 9 17 4"/><polyline points="7 20 12 15 17 20"/></svg>
         </button>
-        <button class="outline-close" id="treePickBtn" data-tree-pick="1" title="选择 / 更换文件夹">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><line x1="12" y1="10.5" x2="12" y2="16.5"/><line x1="9" y1="13.5" x2="15" y2="13.5"/></svg>
+        <button class="tree-btn" id="treePickBtn" data-tree-pick="1" title="选择 / 更换文件夹">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><line x1="12" y1="10.5" x2="12" y2="16.5"/><line x1="9" y1="13.5" x2="15" y2="13.5"/></svg>
         </button>
-        <button class="outline-close" id="treeClose" title="收起文件树">&times;</button>
+        <button class="tree-btn" id="treeClose" title="收起文件树">&times;</button>
       </span>
     </div>
     <div class="outline-body tree-body" id="fileTreeBody"></div>
@@ -458,7 +470,7 @@
        把「隐藏之后怎么找回来」变成一个一眼可见的动作，而不是让人记得去顶栏菜单里翻。
        不支持文件夹 API 时与抽屉一起被摘掉。 -->
   <button class="tree-peek" id="treePeek" hidden title="展开文件树">
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
   </button>
 
   <!-- Floating Outline Panel -->

@@ -202,7 +202,11 @@ body {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  min-width: 216px;
+  /* 宽度跟着内容走。之前钉死 min-width: 216px，又把后缀标签 margin-left:auto 右对齐，
+     于是每一行中间都被撑出一大片空白（菜单看着比内容宽一截）。 */
+  width: max-content;
+  min-width: 0;
+  max-width: 260px;
   padding: 4px;
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
@@ -246,9 +250,10 @@ body {
   color: var(--accent);
 }
 
+/* 后缀标签紧跟着文字，**不再右对齐**：
+   之前是 margin-left:auto 把它推到右端，于是短行中间被撑出一大片空白 ——
+   宽度再跟着内容走也没用，空白是「右对齐」造出来的，不是宽度造出来的。 */
 .export-item .export-ext {
-  margin-left: auto;
-  padding-left: 14px;
   font-size: 11px;
   color: var(--text-muted);
 }
@@ -1029,37 +1034,84 @@ body {
   -webkit-backdrop-filter: blur(14px) saturate(1.7);
 }
 
+/* 顶部这一行 = 工作区名字 + 操作。没有单独的「文件树」标题栏：
+   名字本身就是这一行的内容，操作挂在它的尾部。
+   字号与下面每一行严格一致（13px）——面板里混着 11/12/13px 三种字号最显乱。 */
+.tree-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 4px 6px 4px 12px;
+  min-height: 34px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 13px;
+}
+
+.tree-head-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.tree-root {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .tree-head-actions {
   display: flex;
   align-items: center;
   gap: 2px;
+  flex-shrink: 0;
+}
+
+.tree-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+
+.tree-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* 没有工作区时（#treeRoot 为空）这三个操作无从谈起，头部只留「收起」 */
+.tree-btn[hidden] {
+  display: none !important;
 }
 
 /* 只读降级模式下的角标（完整模式为空字符串，不占位） */
 .tree-mode {
-  margin-left: 6px;
-  font-size: 11px;
+  flex-shrink: 0;
+  font-size: 13px;
   font-weight: 400;
   color: var(--text-muted);
 }
 
 .tree-body {
   padding: 6px 0;
-}
-
-/* 树顶那一行只写工作区名字，视觉上比缩进的行更靠左、更小 */
-.tree-root {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 12px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .2px;
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .tree-row {
@@ -1085,15 +1137,6 @@ body {
   background: var(--accent-light);
   color: var(--accent);
   font-weight: 600;
-}
-
-/* 非文本文件灰显：树里还是要看得见，但不该抢注意力 */
-.tree-row.tree-muted {
-  color: var(--text-muted);
-}
-
-.tree-row.tree-muted:hover {
-  color: var(--text-secondary);
 }
 
 .tree-caret {
@@ -1127,10 +1170,11 @@ body {
   text-overflow: ellipsis;
 }
 
-/* 空目录 / 加载中 / 读取失败：各占一行，别让树看起来像断了 */
+/* 空目录 / 加载中 / 读取失败 / 过滤提示：各占一行，别让树看起来像断了。
+   字号与文件行一致（13px），只有颜色和斜体把它和可点的行区分开。 */
 .tree-note {
   padding: 3px 10px;
-  font-size: 12px;
+  font-size: 13px;
   font-style: italic;
   color: var(--text-muted);
 }
@@ -1139,11 +1183,17 @@ body {
   color: var(--danger);
 }
 
+/* 「已过滤 N 个非 Markdown 文件」——磁盘上确实有、树上确实没有，
+   不说清楚就会被当成 bug，所以用正常体（不是斜体）让它读起来像一句提示。 */
+.tree-note.tree-filtered {
+  font-style: normal;
+}
+
 .tree-empty {
   padding: 24px 16px;
   text-align: center;
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.8;
 }
 
@@ -1153,7 +1203,7 @@ body {
 
 .tree-pick {
   padding: 6px 14px;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .tree-resizer {
@@ -1176,34 +1226,34 @@ body {
   display: none !important;
 }
 
-/* 抽屉收起后的把手：贴左缘竖着的一条，只在「有工作区 + 抽屉收起」时出现。
-   定位用 fixed，避开 .app-main 的 flex 布局；z-index 低于抽屉本身（800）与顶栏。
-   观感与 .file-tree-panel 一致（同样一块毛玻璃），点一下就把抽屉拉回来。 */
+/* 抽屉收起后的把手：贴左缘的一小片圆角，**垂直居中**。
+   收起后它是唯一一眼可见的入口，所以不再用一片灰毛玻璃（太容易被当成装饰），
+   改成主题色的浅底 + 主题色图标；hover 时才填满主题色。 */
 .tree-peek {
   position: fixed;
   left: 0;
-  top: calc(var(--header-height) + 12px);
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 54px;
+  width: 18px;
+  height: 42px;
   padding: 0;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--accent-light);
   border-left: none;
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  background: rgba(255, 255, 255, .82);
-  backdrop-filter: blur(14px) saturate(1.7);
-  -webkit-backdrop-filter: blur(14px) saturate(1.7);
-  color: var(--text-secondary);
+  border-radius: 0 10px 10px 0;
+  background: var(--accent-light);
+  color: var(--accent);
   cursor: pointer;
   z-index: 790;
-  transition: color .15s ease, background .15s ease;
+  transition: width .15s ease, background .15s ease, color .15s ease;
 }
 
 .tree-peek:hover {
-  color: var(--accent);
-  background: var(--bg-hover);
+  width: 22px;
+  background: var(--accent);
+  color: #ffffff;
 }
 
 .tree-peek[hidden] {
@@ -1568,9 +1618,10 @@ body {
   }
 }
 
-/* ===== Print / 导出 PDF =====
-   导出 PDF 走「window.print() + @media print」这条路（零依赖、矢量输出），
-   所以这里必须把界面壳子全部摘掉，只留预览区。缺了这段，打印结果会带上
+/* ===== Print / 打印 =====
+   「导出 PDF」是另一条路（离屏渲染 + jsPDF 下载，不经过这里）；
+   这一段只服务「打印」——走「window.print() + @media print」（零依赖、矢量输出、文字可选），
+   所以必须把界面壳子全部摘掉，只留预览区。缺了这段，打印结果会带上
    顶栏、编辑器和工具栏，还会被 .preview-wrap 的 overflow:auto 截成一页。 */
 @page {
   margin: 16mm;

@@ -1307,15 +1307,166 @@ img { max-width: 100%; }`;
     return ok;
   }
 
-  function exportPdf() {
-    showToast('在打印对话框里选择「目标 → 另存为 PDF」');
+  // 「打印」——交给浏览器自己的打印管线：矢量、文字可选中、页边距与纸张由用户在对话框里定，
+  // 也可以在那里「另存为 PDF」。这条路不生成任何文件、不碰磁盘。
+  function printDocument() {
+    showToast('已唤起打印对话框（可打印，也可另存为 PDF）');
     // 等一帧，确保刚触发的重渲染（如 Mermaid 异步出图）已经落到 DOM 上
     setTimeout(() => window.print(), 60);
   }
 
+  // ===== 导出 PDF（下载）=====
+  // 与「打印」是两件事，别混：
+  //   · 打印     → window.print()：浏览器打印管线（矢量 / 文字可选中）
+  //   · 导出 PDF → 把预览渲染成图片、按 A4 切片拼成 .pdf 文件直接下载
+  // 代价是文字不可选中（图片版），换来的是「点一下就拿到文件」。
+  // 两个库都**按需加载**：只有真的点这一项才会去拉，首屏不为一个低频功能多背几百 KB。
+  const PDF_LIBS = {
+    html2canvas: 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js',
+    jspdf: 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
+  };
+
+  function loadScriptOnce(src) {
+    return new Promise(function (resolve, reject) {
+      const known = document.querySelector('script[data-lazy-src="' + src + '"]');
+      if (known) {
+        if (known.dataset.loaded === '1') return resolve();
+        known.addEventListener('load', function () { resolve(); });
+        known.addEventListener('error', function () { reject(new Error('无法加载 ' + src)); });
+        return;
+      }
+      const s = document.createElement('script');
+      s.src = src;
+      s.async = true;
+      s.dataset.lazySrc = src;
+      s.addEventListener('load', function () { s.dataset.loaded = '1'; resolve(); });
+      s.addEventListener('error', function () { reject(new Error('无法加载 ' + src)); });
+      document.head.appendChild(s);
+    });
+  }
+
+  function ensureLib(globalName, src) {
+    if (window[globalName]) return Promise.resolve();
+    return loadScriptOnce(src).then(function () {
+      if (!window[globalName]) throw new Error(globalName + ' 加载后仍不可用');
+    });
+  }
+
+  // A4 纵向尺寸（pt）与页边距；渲染宽度里 .markdown-body 自带 40px 内边距，故 900 - 80 = 820 正文宽
+  const PDF_MARGIN_PT = 24;
+  const PDF_USABLE_W = 595.28 - PDF_MARGIN_PT * 2;
+  const PDF_USABLE_H = 841.89 - PDF_MARGIN_PT * 2;
+  const PDF_STAGE_W = 900;
+
+  // 从目标位置往回找一条「整行都接近白色」的像素行，在那里切页 ——
+  // 否则正文会在页边界上被切成半行字。找不到就退回原位置，总比切在字腰上强。
+  function findBlankCut(canvas, target) {
+    const ctx = canvas.getContext('2d');
+    const limit = Math.max(0, target - 120);
+    for (let y = Math.min(target, canvas.height - 1); y > limit; y--) {
+      let data;
+      try { data = ctx.getImageData(0, y, canvas.width, 1).data; } catch (e) { return target; }
+      let blank = true;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] < 246 || data[i + 1] < 246 || data[i + 2] < 246) { blank = false; break; }
+      }
+      if (blank) return y;
+    }
+    return target;
+  }
+
+  async function exportPdfFile() {
+    showToast('正在生成 PDF…');
+    await ensureLib('html2canvas', PDF_LIBS.html2canvas);
+    await ensureLib('jspdf', PDF_LIBS.jspdf);
+    const JsPDF = window.jspdf && window.jspdf.jsPDF;
+    if (!JsPDF) throw new Error('jsPDF 不可用');
+
+    // 与「导出 HTML」同一条克隆路径：剥掉 device-* / pnid / 方格背景 / 内联页宽
+    const clone = clonePreviewForExport();
+    // 水印是 #preview 上的一条 inline 背景，上面那一步会连 style 一起剥掉，这里按当前状态补回
+    if (preview.style.backgroundImage) {
+      clone.style.backgroundImage = preview.style.backgroundImage;
+      clone.style.backgroundRepeat = preview.style.backgroundRepeat || 'repeat';
+    }
+    // 固定成文档宽度（900，正文 820）：PDF 不该跟着当前预览档位变形
+    clone.style.cssText +=
+      'width:' + PDF_STAGE_W + 'px;max-width:none;min-height:0;padding:40px;' +
+      'margin:0;border-radius:0;box-shadow:none;background-color:#ffffff;';
+
+    // 离屏舞台：html2canvas 要量真实布局，所以移出视口而不是 display:none
+    const stage = document.createElement('div');
+    stage.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + PDF_STAGE_W + 'px;background:#ffffff;';
+    stage.appendChild(clone);
+    document.body.appendChild(stage);
+
+    try {
+      const contentW = PDF_STAGE_W - 80;                 // 正文实际宽度（px）
+      const pxPerPt = contentW / PDF_USABLE_W;            // px → pt
+      const pageCanvasH = Math.round(PDF_USABLE_H * pxPerPt);
+
+      // 文档过高会撞上浏览器画布尺寸上限。先按高度降采样，实在放不下就明确拒绝，
+      // 让用户走「打印 → 另存为 PDF」—— 绝不静默给一份半截文档。
+      const totalH = clone.getBoundingClientRect().height;
+      const scale = totalH * 2 <= 32000 ? 2 : (totalH * 1.5 <= 32000 ? 1.5 : 1);
+      if (totalH * scale > 32000) {
+        throw new Error('文档过长，超出浏览器画布上限，请改用「打印 → 另存为 PDF」');
+      }
+
+      const canvas = await window.html2canvas(clone, {
+        scale: scale,
+        backgroundColor: '#ffffff',
+        logging: false,
+        useCORS: true,
+        allowTaint: false,
+        windowWidth: PDF_STAGE_W,
+      });
+
+      const pdf = new JsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' });
+      let offset = 0;
+      let pageIndex = 0;
+
+      while (offset < canvas.height) {
+        let sliceH = Math.min(pageCanvasH, canvas.height - offset);
+        const cut = findBlankCut(canvas, offset + sliceH);
+        if (cut > offset + 40) sliceH = cut - offset;
+
+        const page = document.createElement('canvas');
+        page.width = canvas.width;
+        page.height = sliceH;
+        // alpha:false —— 页面本来就是白底，去掉 alpha 通道能显著减小编码体积
+        const ctx = page.getContext('2d', { alpha: false });
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, page.width, page.height);
+        ctx.drawImage(canvas, 0, offset, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+
+        let dataUrl;
+        try {
+          // JPEG 而不是 PNG：PNG 一页要 600KB+（10 页 ≈ 68MB，实测），
+          // 而 0.92 的 JPEG 在这个倍率下文字边缘已经看不出区别，体积却小一个数量级
+          dataUrl = page.toDataURL('image/jpeg', 0.92);
+        } catch (e) {
+          // 画布被跨域图片污染时 toDataURL 会抛 SecurityError —— 说清原因，别报一句英文
+          throw new Error('文档里的跨域图片污染了画布，无法生成 PDF，请改用「打印 → 另存为 PDF」');
+        }
+
+        if (pageIndex) pdf.addPage();
+        pdf.addImage(dataUrl, 'JPEG', PDF_MARGIN_PT, PDF_MARGIN_PT,
+          PDF_USABLE_W, PDF_USABLE_H * (sliceH / pageCanvasH));
+        offset += sliceH;
+        pageIndex++;
+      }
+
+      downloadBlob(pdf.output('blob'), getDocBaseName() + '.pdf');
+      showToast('已导出 PDF（图片版，文字不可选中）', 'success');
+    } finally {
+      if (stage.parentNode) stage.parentNode.removeChild(stage);
+    }
+  }
+
   async function runExport(kind) {
     if (kind === 'md') return exportCopyMarkdown();
-    if (kind === 'pdf') return exportPdf();
+    if (kind === 'print') return printDocument();
     try {
       if (kind === 'html') {
         const html = await buildStandaloneHtml();
@@ -1324,6 +1475,8 @@ img { max-width: 100%; }`;
       } else if (kind === 'word') {
         downloadBlob(buildWordHtml(), getDocBaseName() + '.doc', 'application/msword');
         showToast('已导出 Word（.doc，HTML 套壳）', 'success');
+      } else if (kind === 'pdf') {
+        await exportPdfFile();
       }
     } catch (err) {
       showToast('导出失败：' + ((err && err.message) || err), 'error');
@@ -2227,8 +2380,11 @@ img { max-width: 100%; }`;
     return 'none';
   })();
 
-  // 文本类扩展名可打开，其余灰显（点了只提示）
-  const TREE_TEXT_EXT = ['md', 'markdown', 'mdx', 'txt'];
+  // 树上只保留 Markdown 文档，其余（图片 / 配置 / .txt / 任何二进制）一律过滤掉 ——
+  // 一个真实的写作目录里，绝大多数文件都不是给人读的，全铺出来只会把文档淹掉。
+  // 被过滤掉的文件数会记在节点上，并在树里如实告知（见 appendRows），
+  // 否则「文件明明在磁盘上，树里却没有」会被当成丢文件。
+  const TREE_MD_EXT = ['md', 'markdown', 'mdx'];
   // 命中即整棵剪掉 —— 不忽略的话，树会被依赖目录与产物淹没
   const TREE_IGNORE = ['node_modules', '.git', 'dist', 'build', 'out', '.next', '.venv', '__pycache__', '.DS_Store'];
   const TREE_W_KEY = 'mdtu-tree-width';
@@ -2239,15 +2395,17 @@ img { max-width: 100%; }`;
 
   const treePanel = $('#fileTreePanel');
   const treeBody = $('#fileTreeBody');
+  const treeRootEl = $('#treeRoot');
   const treeModeEl = $('#treeMode');
   const btnOpenFolder = $('#btnOpenFolder');
   const folderInput = $('#folderInput');
   const treeResizer = $('#treeResizer');
   const treePeek = $('#treePeek');
 
-  // 树节点 = { name, kind:'dir'|'file', path, ref, children, loaded, loading, error }
+  // 树节点 = { name, kind:'dir'|'file', path, ref, children, loaded, loading, error, filtered }
   // ref 在完整模式下是 FileSystemHandle，在只读快照模式下是 File 对象。
   // children === null 表示「还没枚举过」，空数组才是「真的是空目录」——两者不能混。
+  // filtered = 这一层被过滤掉的非 Markdown 文件数（0 表示没有东西被藏起来）。
   const treeState = {
     cap: FOLDER_CAP,
     mode: FOLDER_CAP === 'pick' ? 'pick' : (FOLDER_CAP === 'snapshot' ? 'snapshot' : ''),
@@ -2261,14 +2419,14 @@ img { max-width: 100%; }`;
     const i = name.lastIndexOf('.');
     return i > 0 ? name.slice(i + 1).toLowerCase() : '';
   }
-  function isTextName(name) { return TREE_TEXT_EXT.indexOf(treeExt(name)) !== -1; }
+  function isMdName(name) { return TREE_MD_EXT.indexOf(treeExt(name)) !== -1; }
   function shouldIgnore(name) { return TREE_IGNORE.indexOf(name) !== -1; }
   function joinPath(base, name) { return base ? base + '/' + name : name; }
 
   function makeNode(name, kind, path, ref) {
     return {
       name: name, kind: kind, path: path, ref: ref || null,
-      children: null, loaded: false, loading: false, error: '',
+      children: null, loaded: false, loading: false, error: '', filtered: 0,
     };
   }
 
@@ -2282,19 +2440,28 @@ img { max-width: 100%; }`;
   }
 
   // 只枚举一层，子目录等用户点开时才读（懒加载）——
-  // 一次把整棵树铺开，几千文件的目录会直接卡死 UI
-  async function listChildren(dirHandle, basePath) {
+  // 一次把整棵树铺开，几千文件的目录会直接卡死 UI。
+  // 顺便把「这一层被过滤掉几个非 Markdown 文件」数出来，挂回节点上。
+  // 结果直接写进 node，调用方不用再赋值 —— 三个调用点（点开目录 / 全部展开 / 选目录）
+  // 都要同时维护 children / loaded / error / filtered 四件事，散在外面迟早漏一个。
+  async function loadChildren(node) {
     const out = [];
-    for await (const h of dirHandle.values()) {
+    let filtered = 0;
+    for await (const h of node.ref.values()) {
       if (shouldIgnore(h.name)) continue;
-      out.push(makeNode(h.name, h.kind === 'directory' ? 'dir' : 'file', joinPath(basePath, h.name), h));
+      if (h.kind !== 'directory' && !isMdName(h.name)) { filtered++; continue; }
+      out.push(makeNode(h.name, h.kind === 'directory' ? 'dir' : 'file', joinPath(node.path, h.name), h));
     }
     sortTreeNodes(out);
-    return out;
+    node.children = out;
+    node.filtered = filtered;
+    node.loaded = true;
+    node.error = '';
   }
 
   // 只读降级：<input webkitdirectory> 给的是一份扁平文件列表（带 webkitRelativePath），
   // 拿不到目录句柄，这里按路径把树补出来，File 对象挂在叶子上。
+  // 过滤规则与完整模式一致：非 Markdown 文件不进树，但逐层记下被过滤掉的数量。
   function buildSnapshotTree(files) {
     const rootName = ((files[0].webkitRelativePath || '').split('/')[0]) || '工作区';
     const root = makeNode(rootName, 'dir', '', null);
@@ -2322,6 +2489,7 @@ img { max-width: 100%; }`;
         dir = next;
       }
       const leaf = parts[parts.length - 1];
+      if (!isMdName(leaf)) { dir.filtered++; return; }
       dir.children.push(makeNode(leaf, 'file', joinPath(dir.path, leaf), file));
     });
 
@@ -2334,12 +2502,18 @@ img { max-width: 100%; }`;
 
   // ----- 渲染 -----
 
-  function noteRow(text, depth, isError) {
+  function noteRow(text, depth, isError, extraClass) {
     const el = document.createElement('div');
-    el.className = 'tree-note' + (isError ? ' tree-error' : '');
+    el.className = 'tree-note' + (isError ? ' tree-error' : '') + (extraClass ? ' ' + extraClass : '');
     el.style.paddingLeft = (10 + depth * 13) + 'px';
     el.textContent = text;
     return el;
+  }
+
+  // 「已过滤 N 个非 Markdown 文件」的文案只有一个出口：
+  // 一个只剩非 Markdown 文件的目录，和被过滤掉一部分的目录，用的是同一句话加个后缀。
+  function filteredNoteText(n, noMd) {
+    return '已过滤 ' + n + ' 个非 Markdown 文件' + (noMd ? '（无 Markdown 文档）' : '');
   }
 
   function buildRow(node, depth) {
@@ -2358,7 +2532,6 @@ img { max-width: 100%; }`;
       lead.innerHTML = ICON_CARET;
     } else {
       row.classList.add('tree-file');
-      if (!isTextName(node.name)) row.classList.add('tree-muted');
       if (node.path === treeState.currentPath) row.classList.add('active');
       lead.className = 'tree-caret tree-caret-empty';
     }
@@ -2377,35 +2550,52 @@ img { max-width: 100%; }`;
     return row;
   }
 
+  // depth 是「这一层子项的缩进级别」，所以 node.filtered 的提示与它自己的子项同缩进。
+  // 过滤提示放在这一块的最前面：展开就看得见 —— 滚到列表底部才发现等于没提示。
   function appendRows(node, depth, frag) {
-    if (!node.children || !node.children.length) return;
-    node.children.forEach(function (child) {
+    const kids = node.children || [];
+    if (node.filtered) {
+      frag.appendChild(noteRow(filteredNoteText(node.filtered, !kids.length), depth, false, 'tree-filtered'));
+    }
+    if (!kids.length) return;
+
+    kids.forEach(function (child) {
       frag.appendChild(buildRow(child, depth));
       if (child.kind !== 'dir' || !treeState.expanded.has(child.path)) return;
-      if (child.loading) frag.appendChild(noteRow('加载中…', depth + 1));
-      else if (child.error) frag.appendChild(noteRow('读取失败：' + child.error, depth + 1, true));
-      else if (child.children && child.children.length === 0) frag.appendChild(noteRow('(空)', depth + 1));
-      else if (child.children) appendRows(child, depth + 1, frag);
+
+      if (child.loading) { frag.appendChild(noteRow('加载中…', depth + 1)); return; }
+      if (child.error) { frag.appendChild(noteRow('读取失败：' + child.error, depth + 1, true)); return; }
+
+      // 空目录要分清「真的空」与「里面的东西被过滤光了」——后者是过滤造成的，必须说出来
+      if (child.children && child.children.length) { appendRows(child, depth + 1, frag); return; }
+      frag.appendChild(child.filtered
+        ? noteRow(filteredNoteText(child.filtered, true), depth + 1, false, 'tree-filtered')
+        : noteRow('(空)', depth + 1));
     });
   }
 
   function renderTree() {
+    const hasRoot = !!treeState.root;
+
+    // 头部这一行就是工作区名字；没有工作区时它空着，三个树操作一并藏起来（只留「收起」）
+    treeRootEl.textContent = hasRoot ? treeState.root.name : '';
+    treeRootEl.title = hasRoot ? treeState.root.name : '';
+    [$('#treeExpandAll'), $('#treeCollapseAll'), $('#treePickBtn')].forEach(function (b) {
+      b.hidden = !hasRoot;
+    });
+
     treeBody.innerHTML = '';
 
-    if (!treeState.root) {
+    if (!hasRoot) {
       treeBody.innerHTML =
         '<div class="tree-empty">' +
         '<button type="button" class="btn-primary tree-pick" data-tree-pick="1">选择文件夹…</button>' +
-        '<p>打开后可以逐个浏览目录里的文档，点一下就切换。<br>本期为只读：不会改动磁盘上的任何文件。</p>' +
+        '<p>打开后可以逐个浏览目录里的文档，点一下就切换。<br>只展示 Markdown 文档（' +
+        TREE_MD_EXT.map(function (e) { return '.' + e; }).join(' / ') +
+        '），其余文件会被过滤掉并单独说明。<br>本期为只读：不会改动磁盘上的任何文件。</p>' +
         '</div>';
       return;
     }
-
-    const head = document.createElement('div');
-    head.className = 'tree-root';
-    head.textContent = treeState.root.name;
-    head.title = treeState.root.name;
-    treeBody.appendChild(head);
 
     if (treeState.root.error) {
       treeBody.appendChild(noteRow('读取失败：' + treeState.root.error, 0, true));
@@ -2476,9 +2666,7 @@ img { max-width: 100%; }`;
         if (!c.loaded && c.ref) {
           count++;
           try {
-            c.children = await listChildren(c.ref, c.path);
-            c.loaded = true;
-            c.error = '';
+            await loadChildren(c);
           } catch (err) {
             c.error = (err && err.message) || String(err);
             c.children = null;
@@ -2510,9 +2698,7 @@ img { max-width: 100%; }`;
       node.loading = true;
       renderTree();
       try {
-        node.children = await listChildren(node.ref, node.path);
-        node.loaded = true;
-        node.error = '';
+        await loadChildren(node);
       } catch (err) {
         // 单个子目录读不了（权限 / 被占用）只局部标红，不中断整棵树
         node.error = (err && err.message) || String(err);
@@ -2606,14 +2792,20 @@ img { max-width: 100%; }`;
     treeState.root.loading = true;
     renderTree();
     try {
-      treeState.root.children = await listChildren(handle, '');
-      treeState.root.loaded = true;
+      await loadChildren(treeState.root);
     } catch (err) {
       treeState.root.error = (err && err.message) || String(err);
     }
     treeState.root.loading = false;
     renderTree();
-    showToast('已打开文件夹：' + handle.name);
+    showToast('已打开文件夹：' + handle.name + rootFilterNote(treeState.root));
+  }
+
+  // 打开文件夹时顺带说一句「过滤掉了多少」，不然一进去就少一堆文件会让人以为出错了。
+  // 只报顶层这一次：往下钻的目录各自有就地提示（见 appendRows），不必重复。
+  function rootFilterNote(root) {
+    if (!root || !root.filtered) return '';
+    return '（已过滤 ' + root.filtered + ' 个非 Markdown 文件）';
   }
 
   // 「选择文件夹」在两种能力下走两条通道：完整模式有目录句柄，快照模式只能借 input
@@ -2631,17 +2823,14 @@ img { max-width: 100%; }`;
     treeState.currentPath = '';
     treeState.expanded.clear();
     setTreePanel(true);
-    showToast('已打开文件夹：' + treeState.root.name + '（只读快照）');
+    showToast('已打开文件夹：' + treeState.root.name + '（只读快照）' + rootFilterNote(treeState.root));
   }
 
   function onTreeRowClick(row) {
     const node = findNode(row.dataset.path);
     if (!node) return;
     if (node.kind === 'dir') { toggleDir(node); return; }
-    if (!isTextName(node.name)) {
-      showToast('只支持打开文本文件（' + TREE_TEXT_EXT.join(' / ') + '）');
-      return;
-    }
+    // 树里只会出现 Markdown 文档（非 Markdown 在枚举时就过滤掉了），点开即可
     openTreeNode(node);
   }
 
