@@ -52,12 +52,12 @@
 
 ```
 mdtu-editor/
-├── index.html        # 页面结构 + CDN 依赖引入 + 图标声明（495 行）
+├── index.html        # 页面结构 + CDN 依赖引入 + 图标声明（497 行）
 ├── Markdown.ico      # 站点图标，六帧（16/32/48/64/128/256）；页头 / 标签页 / 桌面快捷方式共用
 ├── css/
-│   └── style.css     # 全部样式：2 套主题 + 布局 + 弹窗 + 水印 + 元数据 + 设备档预览 + 文件树抽屉 + 打开与导出下拉 + 打印（1716 行）
+│   └── style.css     # 全部样式：2 套主题 + 布局 + 弹窗 + 水印 + 元数据 + 设备档预览 + 文件树抽屉 + 打开与导出下拉 + 打印（1729 行）
 ├── js/
-│   └── app.js        # 全部逻辑：解析/渲染/大纲/水印/模板/元数据/复制/导出/导出 PDF/设备档预览/文件夹模式（3034 行）
+│   └── app.js        # 全部逻辑：解析/渲染/大纲/水印/模板/元数据/复制/导出/导出 PDF/设备档预览/文件夹模式（3040 行）
 ├── README.md         # 项目说明（GitHub 标准格式）
 ├── ROADMAP.md        # 未来功能升级路线（独立文档）
 ├── DESIGN.md         # 本文档
@@ -183,7 +183,7 @@ preview.innerHTML = html  ← 写入预览区
 | `#linksModal` | 760px (modal-lg) | 工具/开源项目导航（三 Tab） |
 | `#watermarkModal` | 680px (modal-md) | 水印设置（左表单 + 右预览） |
 
-另有悬浮组件：文档大纲 `.outline-panel`（右侧垂直居中悬浮）、**文件树抽屉 `.file-tree-panel`**（左侧，F5，见 7.10）、**抽屉入口 `.tree-peek`**（抽屉收起后浮在内容上层的 44×44 主题色圆球，可拖动、位置记在 `mdtu-tree-peek-pos`，只在「有工作区 + 抽屉收起」时出现）、Toast 提示 `.toast`。
+另有悬浮组件：文档大纲 `.outline-panel`（右侧垂直居中悬浮）、**文件树抽屉 `.file-tree-panel`**（左侧，F5，见 7.10）、**抽屉入口 `.tree-peek`**（抽屉收起后浮在内容上层的 44×44 实心蓝圆球，按下变橙，可拖动、位置记在 `mdtu-tree-peek-pos`，只在「有工作区 + 抽屉收起」时出现）、Toast 提示 `.toast`。
 
 ---
 
@@ -292,7 +292,7 @@ preview.innerHTML = html  ← 写入预览区
 
 ### 7.8 导出能力（`// ===== Export (F1) =====`，app.js:1041–1316；`// ===== 导出 PDF（下载）=====`，app.js:1318–1484）
 
-顶栏「复制」**左侧**新增**「导出」下拉**（`index.html:118–150`，样式 `style.css:180–276`），把五个动作收进一个菜单，避免顶栏按钮继续横向膨胀。除「打印」外的四个动作全部通过**浏览器下载**落盘（`Blob` + `URL.createObjectURL` + `<a download>`），不经过任何服务端；**零新增运行时依赖**——`html2canvas` / `jsPDF` 只在第一次点「导出 PDF」时才从 CDN 拉（`loadScriptOnce()` app.js:1329 + `ensureLib()` app.js:1348）。
+顶栏「复制」**左侧**新增**「导出」下拉**（`index.html:118–152`，样式 `style.css:181–282`），把五个动作收进一个菜单，避免顶栏按钮继续横向膨胀。除「打印」外的四个动作全部通过**浏览器下载**落盘（`Blob` + `URL.createObjectURL` + `<a download>`），不经过任何服务端；**零新增运行时依赖**——`html2canvas` / `jsPDF` 只在第一次点「导出 PDF」时才从 CDN 拉（`loadScriptOnce()` app.js:1329 + `ensureLib()` app.js:1348）。
 
 | 动作 | `data-export` | 实现 | 产物 |
 |---|---|---|---|
@@ -329,7 +329,7 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 
 > **`data-page-node-id` 是什么？** 这份 `index.html` 一旦托管成 WorkBuddy 资料库的「页面」，页面平台就会给每个元素打上这个东西（内部叫 `pnid`），用于**节点级评论**与**「划词让 AI 改」的改动定位**（见内置 `library` 技能的 `page/edit-flow.md`）。它对运行没有任何影响，但会随 `preview.cloneNode(true)` 混进公众号与导出文件。**2026-10-13 已确认项目里零处读取它，整批清除了 312 处**；`stripEditorOnlyAttrs()`（app.js:919）留在 `copyToClipboard()`（app.js:942）与 `clonePreviewForExport()`（app.js:1106）两条克隆路径上做防御——文件若再被托管回资料库，属性会重新出现。ex-test 有一条「手动注入 pnid → 导出应剥掉」的用例锁着这段逻辑。
 
-**打印样式（`style.css:1621–1712`），六组规则：**
+**打印样式（`style.css:1638–1729`），六组规则：**
 
 1. **隐藏界面壳子**：`.app-header` / `.editor-panel` / `.resizer` / `.preview-toolbar` / `.outline-panel` / `.toast` / `.modal-overlay`
 2. **解除页面级锁定**：`html, body { height: auto; overflow: visible }`、`body { display: block }`、`.app-main { display: block; overflow: visible }`
@@ -338,7 +338,7 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 5. **`#preview { print-color-adjust: exact }`**：暗色主题按原色打印，不被浏览器「省墨」洗成白底
 6. **分页控制**：`pre` / `blockquote` / `table` / `.mermaid-rendered` / `.katex-display` / `.fm-block` 加 `break-inside: avoid`，`h1`–`h6` 加 `break-after: avoid`，`p, li` 设 `orphans: 2; widows: 2`
 
-另有 `@page { margin: 16mm }` 放在 `@media print` **之外**（`style.css:1626`，`@media print` 从 `:1630` 起）——`@page` 本身就是页面级 at-rule，放外面更直观，两条规则都有断言盯着。
+另有 `@page { margin: 16mm }` 放在 `@media print` **之外**（`style.css:1643`，`@media print` 从 `:1647` 起）——`@page` 本身就是页面级 at-rule，放外面更直观，两条规则都有断言盯着。
 
 **导出 Word 的兼容性子集（`buildWordHtml()`，app.js:1241）。** `application/msword` + `.doc` 套壳，本质仍是 HTML。Word / WPS 只认一小撮 CSS，因此：
 
@@ -393,7 +393,7 @@ preview.className = [
 
 全文**只允许这一处写 `preview.className = [`**（ex-test 有断言 `eq((appSrc.match(/preview\.className = \[/g)||[]).length, 1)` 锁着）。任何一处直接整串覆盖，都会把其余几维静默冲掉——这是多维共存能被破坏的唯一方式。`applyTheme()` / `applyDevice()` 都只改 `state` 再调它，方格背景按钮也从 `classList.toggle('grid-bg', …)` 改为同一出口。
 
-**四、版心：设备视口压一道 820px 上限（`style.css:497–499`）。**
+**四、版心：设备视口压一道 820px 上限（`style.css:498–500`）。**
 
 ```css
 .markdown-body {
@@ -467,9 +467,9 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 
 **UI 复用**：抽屉刻意带上 `.outline-panel` 类——浮层骨架、`.show` 切换、**打印时隐藏**三件事都由那一套既有规则承担，`.file-tree-panel` 只把它从「右侧居中浮层」改成「左侧通栏抽屉」（毛玻璃 + 宽度拖拽，宽度记在 `mdtu-tree-width`）。文件行会占住折叠箭头那一列（空槽），否则同级目录与文件的图标 / 文字会左右错开。
 
-**抽屉头部不再单占一行标题。** 早先的版本是 `.outline-header`「文件树…」+ 下面一行工作区名，两行都占地方，字号还和树内容不一致。现在头部只有一个 `.tree-head`：左边 `.tree-root`（工作区名，13px / 600 粗）+ `.tree-mode`（快照模式标签），右边 `.tree-head-actions` 里四个 24×24 的 `.tree-btn`（全部展开 / 全部收起 / 换文件夹 / **收起**）。最后一个刻意**不用 `×`**，而是「面板 + 左向箭头」——`×` 在这个位置会被读成「关闭 / 删除」，可它做的只是把抽屉折回边缘，不是关掉工作区。**全树字号统一 13px**：`.tree-head` / `.tree-root` / `.tree-mode` / `.tree-row` / `.tree-note` / `.tree-empty` / `.tree-pick` 同一档，不再有大有小。没有工作区时三个操作按钮 `hidden`（`.tree-btn[hidden]{display:none!important}`）。
+**抽屉头部不再单占一行标题。** 早先的版本是 `.outline-header`「文件树…」+ 下面一行工作区名，两行都占地方，字号还和树内容不一致。现在头部只有一个 `.tree-head`：左边 `.tree-root`（工作区名，14px / 600 粗）+ `.tree-mode`（快照模式标签），右边 `.tree-head-actions` 里四个 28×28 的 `.tree-btn`（图标 16×16：全部展开 / 全部收起 / 换文件夹 / **收起**）。最后一个刻意**不用 `×`**，而是「面板 + 左向箭头」——`×` 在这个位置会被读成「关闭 / 删除」，可它做的只是把抽屉折回边缘，不是关掉工作区。**全树字号统一 14px**：`.tree-head` / `.tree-root` / `.tree-mode` / `.tree-row` / `.tree-note` / `.tree-empty` / `.tree-pick` 同一档，不再有大有小；树内图标同步放大（`ICON_CARET` 12 / `ICON_DIR` 15 / `ICON_FILE` 14），折叠箭头槽 14px、图标槽 16px、缩进步长 `depth * 15`——**字号、槽宽、步长是联动量，改一个要跟着改另外两个**，否则同级目录与文件的图标会重新错开。没有工作区时三个操作按钮 `hidden`（`.tree-btn[hidden]{display:none!important}`）。
 
-**抽屉的显示 / 隐藏有三条路，各司其职。** ① 顶栏「打开 → 文件夹」那一项本身就是**开关**（展开时带 `.active` 激活态）；② 抽屉头部的「收起」按钮把它折回边缘；③ **抽屉收起后，留一枚悬浮球 `.tree-peek`**——`position: fixed`、`z-index: 790`，44×44 正圆、`--accent-light` 底 + `--accent` 字、带投影（主题色 + 投影 = 一眼看出「这是个能点、能挪的东西」）。它用**指针事件**实现拖动：`pointerdown` 记起点、`pointermove` 写内联 `left/top`（`place()` 把坐标钳在视口内）、`pointerup` 落库；**位移小于 `PEEK_DRAG_SLOP`（4px）才算一次点击**，只有点击才展开抽屉——否则每次把球挪开都会顺手把文件树弹出来。位置存 `mdtu-tree-peek-pos`，`resize` 时重新钳制一次，免得窗口变小后球被留在视口外。第 ③ 条只在「**已经打开过工作区 + 抽屉处于收起**」时露出——还没选过目录时那个位置就空着（入口在顶栏菜单里，不需要第二个）。这条是为了把「隐藏之后怎么找回来」变成一个一眼可见、还能随手挪开的动作，而不是让人记得去菜单里翻。
+**抽屉的显示 / 隐藏有三条路，各司其职。** ① 顶栏「打开 → 文件夹」那一项本身就是**开关**（展开时带 `.active` 激活态）；② 抽屉头部的「收起」按钮把它折回边缘；③ **抽屉收起后，留一枚悬浮球 `.tree-peek`**——`position: fixed`、`z-index: 790`，44×44 正圆、**实心 `--accent` 蓝底 + 白图标**、带投影（实心色 + 投影 = 一眼看出「这是个能点、能挪的东西」；浅底在白色正文上几乎化进背景，所以不用浅底）。按下时切 `.pressing` → `--accent-press`（`#f97316` 橙），给一个「按到了」的反馈；**这里不能用 `:active`**——`pointerdown` 里调了 `preventDefault()`，浏览器不再派发 `mousedown`，`:active` 未必成立，所以由 JS 显式加/摘 class，颜色才可控、可测。它用**指针事件**实现拖动：`pointerdown` 记起点、`pointermove` 写内联 `left/top`（`place()` 把坐标钳在视口内）、`pointerup` 落库；**位移小于 `PEEK_DRAG_SLOP`（4px）才算一次点击**，只有点击才展开抽屉——否则每次把球挪开都会顺手把文件树弹出来。位移一旦过阈值就摘掉 `.pressing`，于是**「点击 = 橙、拖动 = 蓝」在颜色上也能分辨**。位置存 `mdtu-tree-peek-pos`，`resize` 时重新钳制一次，免得窗口变小后球被留在视口外。第 ③ 条只在「**已经打开过工作区 + 抽屉处于收起**」时露出——还没选过目录时那个位置就空着（入口在顶栏菜单里，不需要第二个）。这条是为了把「隐藏之后怎么找回来」变成一个一眼可见、还能随手挪开的动作，而不是让人记得去菜单里翻。⚠️ 橙色只在**按下那一瞬**可见：球在 `pointerup` 后随抽屉展开一起隐藏，它不是一个残留状态。
 
 **「全部展开 / 全部收起」是两件不同的事。** 收起只是 `treeState.expanded.clear()`（清空展开集合，树的 `children` 留着，重新展开不必再读盘）。展开则要**逐个目录读盘**——懒加载的树一旦全展开，等于把整棵目录树读进内存，几千文件的目录会直接拖死 UI，所以 `TREE_EXPAND_MAX = 400` 封顶：到顶就停手并 `showToast('目录较多，只展开了前 400 个')`，而不是假装展完了。读盘过程中每 20 个目录重绘一次（每个都重绘会把整趟遍历拖慢一个量级），并用 `treeExpanding` 防止重复点击叠加。
 

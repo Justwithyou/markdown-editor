@@ -646,16 +646,16 @@ try {
 
 ---
 
-## 11. 落地记录（F5-a，2026-10-13；2026-10-14 三轮修订：结构收拢 + 观感与产物 + 空目录剪枝与悬浮球）
+## 11. 落地记录（F5-a，2026-10-13；2026-10-14 四轮修订：结构收拢 + 观感与产物 + 空目录剪枝与悬浮球 + 字号图标与球体配色）
 
 ### 11.1 落地面
 
 | 文件 | 改动 |
 |------|------|
-| `index.html` | 顶栏「打开」下拉（`#openWrap` / `#btnOpen` / `#openMenu`，内含 **`#btnOpenFile`（文件）** 与 **`#btnOpenFolder`（文件夹）**；后者默认 `hidden`，能力不足时连节点一起摘掉）+ 只读降级用的 `#folderInput[webkitdirectory]` + 左侧抽屉 `#fileTreePanel`（头部 `.tree-head` = 工作区名 `#treeRoot` + 操作 `#treeExpandAll` / `#treeCollapseAll` / `#treePickBtn` / `#treeClose`（图标是「面板 + 左向箭头」，不是 `×`））+ 抽屉收起后那枚**可拖动的悬浮球** `#treePeek` |
-| `css/style.css` | 新增 `/* ===== F5：文件树抽屉 =====` 段（复用 `.outline-panel`，覆盖成左侧毛玻璃抽屉 + 行样式 + 宽度拖拽把手 + 悬浮球 `.tree-peek`：44×44 正圆 + 投影 + `cursor:grab` + `.dragging` 态）+ `#openWrap.single .export-caret`；**顺带修掉顶栏溢出**（见 11.3） |
-| `js/app.js` | 末尾新增 `// ===== F5：文件夹模式（只读）=====` 段（约 550 行），并在 `init()` 里调一次 `initFolderMode()`；「打开」下拉的开关逻辑在 `setOpenMenu()` 附近；悬浮球的拖动逻辑是一段独立 IIFE（`PEEK_SIZE` / `PEEK_DRAG_SLOP` / `place()` / `persist()`） |
-| `.workbuddy/tools/fs-test.js` | 新增回归套件（初版 104 条 → 结构修订 155 条 → 观感与产物修订 199 条 → 空目录剪枝 / 悬浮球修订后 **222 条**；工具目录，不进仓库） |
+| `index.html` | 顶栏「打开」下拉（`#openWrap` / `#btnOpen` / `#openMenu`，内含 **`#btnOpenFile`（文件）** 与 **`#btnOpenFolder`（文件夹）**；后者默认 `hidden`，能力不足时连节点一起摘掉）+ 只读降级用的 `#folderInput[webkitdirectory]` + 左侧抽屉 `#fileTreePanel`（头部 `.tree-head` = 工作区名 `#treeRoot` + 操作 `#treeExpandAll` / `#treeCollapseAll` / `#treePickBtn` / `#treeClose`（图标是「面板 + 左向箭头」，不是 `×`；四个按钮 28×28、图标 16×16））+ 抽屉收起后那枚**可拖动的悬浮球** `#treePeek`（实心蓝，按下的那一下切橙） |
+| `css/style.css` | 新增 `/* ===== F5：文件树抽屉 =====` 段（复用 `.outline-panel`，覆盖成左侧毛玻璃抽屉 + 行样式 + 宽度拖拽把手 + 悬浮球 `.tree-peek`：44×44 正圆 + 投影 + `cursor:grab` + `.dragging` 态 + **`.pressing` 橙色按下态**；树内文字统一 **14px**、折叠槽 14 / 图标槽 16）+ `:root` 新增 `--accent-press: #f97316` + `#openWrap.single .export-caret`；**顺带修掉顶栏溢出**（见 11.3） |
+| `js/app.js` | 末尾新增 `// ===== F5：文件夹模式（只读）=====` 段（约 550 行），并在 `init()` 里调一次 `initFolderMode()`；「打开」下拉的开关逻辑在 `setOpenMenu()` 附近；树图标常量 `ICON_CARET` / `ICON_DIR` / `ICON_FILE` 已放大（12 / 15 / 14），缩进步长 `depth * 15`；悬浮球的拖动逻辑是一段独立 IIFE（`PEEK_SIZE` / `PEEK_DRAG_SLOP` / `place()` / `persist()`，按下加 `.pressing`、开始拖动就摘掉） |
+| `.workbuddy/tools/fs-test.js` | 新增回归套件（初版 104 条 → 结构修订 155 条 → 观感与产物修订 199 条 → 空目录剪枝 / 悬浮球修订 222 条 → 字号图标与球体配色修订后 **238 条**；工具目录，不进仓库） |
 
 ### 11.2 与规划的差异（都是有意的）
 
@@ -680,15 +680,15 @@ try {
 
 ### 11.4 验证
 
-`.workbuddy/tools/fs-test.js`，**三轮修订后 222 条**：
+`.workbuddy/tools/fs-test.js`，**四轮修订后 238 条**：
 
 | 段 | 覆盖 |
 |----|------|
-| A 静态源码断言（89 条） | 入口 / 抽屉 / 三层探测 / 忽略清单 / `numeric` 排序 / 严格 UTF-8 判据 / **「代码里不得出现任何写盘 API」**（`createWritable`、`removeEntry`、`requestPermission`… 逐条断言不存在）/ 抽屉头部结构（无「文件树」标题、操作挂名字行尾、无工作区时按钮 `hidden`）/**「收起」不是 `×`** / 全树字号统一 13px / 只列 Markdown + `hasMarkdownDeep()` 探测与预算 + 快照 `prune()` / 悬浮球几何与拖动（指针事件、位移阈值、位置持久化、视口钳制） |
-| B jsdom 端到端（70 条） | 把 `showDirectoryPicker` 打桩成内存假文件系统，走真实点击路径：建树 → **空目录整条剪掉**（`assets` 不在树里，且**只被探过一次**）→ 探测早退（`notes` 探到 `.md` 就收手，`sub` 一次都没读）→ 展开 / 收起 → 切文档且预览跟随 → **悬浮球轻点展开 / 拖动改位置且不弹抽屉 / 位置落库** → BOM / GBK 解码 |
-| C 真实 Edge（63 条） | 抽屉锚位（落在顶栏下方、不溢出视口、默认 264px）、毛玻璃生效、缩进随层级递增、**同级目录与文件的图标 / 文字对齐**、真实浏览器里点文件确实换正文、**顶栏按钮全在可视区内且互不重叠**、抽屉的开关 / 全部展开收起、**悬浮球 44×44 正圆 / 投影 / 配色 / `cursor:grab` + 真实 `PointerEvent` 走通拖动**、**面板内四类行字号完全相等**、`.txt` 与「没有 Markdown 的目录」都不在树中、**两个下拉的宽度不再是 216px 且后缀紧贴文字**、导出菜单五个动作、**全屏时设备档隐藏且正文仍按当前档渲染**、打开文件不弹 Toast |
+| A 静态源码断言（97 条） | 入口 / 抽屉 / 三层探测 / 忽略清单 / `numeric` 排序 / 严格 UTF-8 判据 / **「代码里不得出现任何写盘 API」**（`createWritable`、`removeEntry`、`requestPermission`… 逐条断言不存在）/ 抽屉头部结构（无「文件树」标题、操作挂名字行尾、无工作区时按钮 `hidden`）/**「收起」不是 `×`** / 全树字号统一 **14px**、头部按钮 28×28、折叠槽与图标槽 14/16、三个树图标已放大 / 只列 Markdown + `hasMarkdownDeep()` 探测与预算 + 快照 `prune()` / 悬浮球几何与拖动（指针事件、位移阈值、位置持久化、视口钳制）/**实心蓝底 + 白图标、`.pressing` 切 `--accent-press` 橙、拖动时退回蓝** |
+| B jsdom 端到端（73 条） | 把 `showDirectoryPicker` 打桩成内存假文件系统，走真实点击路径：建树 → **空目录整条剪掉**（`assets` 不在树里，且**只被探过一次**）→ 探测早退（`notes` 探到 `.md` 就收手，`sub` 一次都没读）→ 展开 / 收起 → 切文档且预览跟随 → **悬浮球轻点展开 / 拖动改位置且不弹抽屉 / 位置落库 / 按下挂 `.pressing`、拖动摘掉** → BOM / GBK 解码 |
+| C 真实 Edge（68 条） | 抽屉锚位（落在顶栏下方、不溢出视口、默认 264px）、毛玻璃生效、缩进随层级递增、**同级目录与文件的图标 / 文字对齐**、真实浏览器里点文件确实换正文、**顶栏按钮全在可视区内且互不重叠**、抽屉的开关 / 全部展开收起、**悬浮球 44×44 正圆 / 投影 / 实心蓝 + 白图标 / `cursor:grab` + 真实 `PointerEvent` 走通「按下变橙 → 拖动退回蓝 → 挪位置」**、**面板内四类行字号完全相等且 ≥14px**、头部按钮图标 ≥16px、`.txt` 与「没有 Markdown 的目录」都不在树中、**两个下拉的宽度不再是 216px 且后缀紧贴文字**、导出菜单五个动作、**全屏时设备档隐藏且正文仍按当前档渲染**、打开文件不弹 Toast |
 
-连同既有四套（`fm-unit` 95 + `fm-e2e` 87 + `bq-test` 58 + `ex-test` 262），**合计 724 条断言，0 失败**。C 段顺带产出一张 `shots/fs-tree.png` 供人工核观感（脚本会打桩一个假文件系统，所以图上的树是构造出来的样本，不是真实磁盘）；截图前会把抽屉打开、树全部展开、设备档拨回 PC，让图能看清树本身。
+连同既有四套（`fm-unit` 95 + `fm-e2e` 87 + `bq-test` 58 + `ex-test` 262），**合计 740 条断言，0 失败**。C 段顺带产出两张图供人工核观感（脚本会打桩一个假文件系统，所以图上的树是构造出来的样本，不是真实磁盘）：`shots/fs-tree.png` 拍放大的文件树（截图前把抽屉打开、树全部展开、设备档拨回 PC），`shots/fs-peek.png` 拍收起后那枚实心蓝悬浮球。
 
 ### 11.5 修订记录（2026-10-14）
 
@@ -714,7 +714,7 @@ try {
 |---|---------|------|---------|
 | 1 | 「抽屉收起时的图标调小、圆弧角、垂直居中、给个颜色，不然太不明显」 | `.tree-peek` 重写：`18×42`、`top:50%` + `translateY(-50%)`、只留右半圆角 `0 10px 10px 0`、`--accent-light` 底 + `--accent` 字，悬停加深加宽到 22px | 压在左缘的**一截**，不是一条长条；颜色让它在任何主题下都能被一眼看到。※**当晚再改：换成 44×44 可拖动悬浮球（§11.7）** |
 | 2 | 「只展示 MD 文件，有其它格式的要提示已过滤」 | 过滤**下沉到枚举层**（`loadChildren()` / `buildSnapshotTree()` 里 `isMdName()` 不过关就 `filtered++` 且不入队）；每个目录的行首出 `filteredNoteText(n, noMd)`：「已过滤 N 个非 Markdown 文件」，该目录无 MD 时补「（无 Markdown 文档）」 | 不用「建好再 CSS 隐藏」——那样文件仍在 DOM 与内存里。`TREE_TEXT_EXT`（含 `txt`）改名 `TREE_MD_EXT` 并去掉 `txt`；目录一律保留。※**当晚再改：不再报数、没有 MD 的目录连文件夹都不显示（§11.7）** |
-| 3 | 「不要顶部文件树描述，操作放到文件夹名这一行尾部，字体统一」 | 删掉 `.outline-header` 那一行；头部只剩 `.tree-head`（工作区名 + 三个操作按钮 `hidden` 规则）；**全树字号统一 13px**（原 `.tree-note` / `.tree-empty` / `.tree-pick` 都是 12px，现与 `.tree-root` / `.tree-row` 同号） | 隐藏按钮用 `.tree-btn[hidden]{display:none!important}`——因为 `.tree-btn` 是 `inline-flex`，`hidden` 属性默认压不住 |
+| 3 | 「不要顶部文件树描述，操作放到文件夹名这一行尾部，字体统一」 | 删掉 `.outline-header` 那一行；头部只剩 `.tree-head`（工作区名 + 三个操作按钮 `hidden` 规则）；**全树字号统一 13px**（原 `.tree-note` / `.tree-empty` / `.tree-pick` 都是 12px，现与 `.tree-root` / `.tree-row` 同号；※第四轮已整体提到 14px，见 §11.8） | 隐藏按钮用 `.tree-btn[hidden]{display:none!important}`——因为 `.tree-btn` 是 `inline-flex`，`hidden` 属性默认压不住 |
 | 4 | 「打开和导出下拉太宽，中间空白太大」 | `.export-menu` 从 `min-width: 216px` 改成 `width: max-content; min-width: 0; max-width: 260px`；`.export-item .export-ext` **去掉 `margin-left: auto`** | 真正造成中缝的是 `margin-left: auto`，不是宽度——两处都改才对；改完两个下拉实测 172–174px |
 | 5 | 「导出 PDF 现在是打印，把这俩分开：导出 PDF 是下载，打印是渲染之后的动作」 | 「导出 PDF」改走 `exportPdfFile()`（离屏渲染 → A4 切片 → JPEG → `jsPDF` → `downloadBlob()`），**点一下即下载**；另立「打印」菜单项走原 `printDocument()`（`window.print()`） | PDF 产物是图片、文字不可选，**这条写进 Toast 与 README 已知限制**；超长文档撞画布上限时明确拒绝并引导改用打印。`html2canvas` / `jspdf` 首次点击才拉，`index.html` 的常量依赖计数不变 |
 
@@ -732,9 +732,24 @@ try {
 | 2 | 「文件树面板收起的图标改一下，现在是个 `×` 容易引起歧义」 | `#treeClose` 换成**「面板 + 左向箭头」**的 SVG（`<rect>` + 竖分隔线 + 左向 `<polyline>`） | `×` 在这个位置天然被读成「关闭 / 删除」，可它做的只是把抽屉折回边缘——不是关掉工作区。图标语义要和动作对齐 |
 | 3 | 「收起时的显示方式改为悬浮在上层的球状组件，并支持拖动」 | `.tree-peek` 从「贴左缘、18×42、只有右半圆角」改为 **44×44 正圆 + 投影 + `cursor: grab`**；指针事件拖动（`pointerdown` / `pointermove` / `pointerup` + `setPointerCapture`），`place()` 把坐标钳在视口内，位置存 `mdtu-tree-peek-pos`，`resize` 时重新钳制 | **拖动与点击必须分开**：位移小于 `PEEK_DRAG_SLOP`（4px）才算一次点击，只有点击才 `setTreePanel(true)`——否则每次把球挪开都会顺手把文件树弹出来。`touch-action: none` 让触屏上也由我们接管拖动，不被浏览器的滚动抢走 |
 
-**验证（第三轮）**：`fs-test.js` 扩到 **222 条**（静态 89 / jsdom 70 / 真实 Edge 63）。其中两处断言按新语义**改写而非删除**，因为「懒」这件事本身没变、变的只是「探一层」：
+**验证（第三轮）**：`fs-test.js` 扩到 **222 条**（静态 89 / jsdom 70 / 真实 Edge 63）（※第四轮再扩到 238 条，见 §11.8）。其中两处断言按新语义**改写而非删除**，因为「懒」这件事本身没变、变的只是「探一层」：
 
 - jsdom 段用假文件系统的 `__listed` 计数证明：`assets`（全是图片和 CSS，一棵子树没有 MD）**只被探过一次就整条剪掉**，从来没被当成普通目录展开；`notes` 被探时**见到第一个 `.md` 就收手**——`sub` 那会儿一次都没被读过。
 - 真实 Edge 段把「点把手展开」换成完整的指针序列：轻点（位移 0）→ 抽屉展开；再拖动 +100px → 位置变了、**抽屉没被弹出来**、`localStorage` 里落了新坐标。
 
-连同既有四套（`fm-unit` 95 + `fm-e2e` 87 + `bq-test` 58 + `ex-test` 262），**合计 724 条断言全绿**。
+连同既有四套（`fm-unit` 95 + `fm-e2e` 87 + `bq-test` 58 + `ex-test` 262），**合计 724 条断言全绿**（※第四轮为 740 条，见 §11.8）。
+
+### 11.8 字号与图标放大 + 悬浮球配色（2026-10-14 晚，第四轮，两处）
+
+用户反馈两条：树面板「看起来好小」，以及悬浮球「背景色直接改成蓝色，点击时动态切换到橙色」。
+
+| # | 反馈 | 落地 | 取舍 |
+|---|------|------|------|
+| 1 | 「文件树面板的字体、图标都调大一些，看起来好小」 | 全树文字 **13px → 14px**（`.tree-head` / `.tree-root` / `.tree-mode` / `.tree-row` / `.tree-note` / `.tree-empty` / `.tree-pick` 一起改，仍保证同号）；图标 `ICON_CARET` 10→**12**、`ICON_DIR` 13→**15**、`ICON_FILE` 12→**14**；头部四个 `.tree-btn` 24×24 → **28×28**、内联 SVG 14→**16**；折叠箭头槽 12→**14**、图标槽 14→**16**、缩进步长 `depth * 13` → `depth * 15`；行内边距 4/10 → 5/12 | **槽宽与缩进步长必须一起动**：文件行靠「占住折叠箭头那一列」才能和同级目录对齐，字号一变而槽宽不变，图标与文字会重新错开。三个数（字号 / 槽宽 / 步长）是联动量，改一个要跟着改另外两个，`fs-test` 的「同级目录与文件图标对齐」就是盯这个的 |
+| 2 | 「悬浮球背景色直接改成蓝色，点击时动态切换到橙色」 | `.tree-peek` 底色从 `--accent-light`（近白的浅底）+ 蓝图标，改成**实心 `--accent` 蓝 + 白图标**；`:root` 新增 `--accent-press: #f97316`，按下时 `.tree-peek.pressing` 切橙 | **不能靠 `:active`**：`pointerdown` 里调了 `preventDefault()`，浏览器不再派发 `mousedown`，`:active` 未必成立。改成 JS 显式加/摘 `.pressing`，颜色才可控、可测。**「点击」与「拖动」在颜色上分开**：位移一过 `PEEK_DRAG_SLOP` 就摘掉 `.pressing`（退回蓝），所以拖球时不会一直是橙。⚠️ 因为球在 `pointerup` 后随抽屉展开而隐藏，橙色是**按下那一瞬的反馈**，不是残留状态 |
+
+**验证（第四轮）**：`fs-test.js` 扩到 **238 条**（静态 97 / jsdom 73 / 真实 Edge 68）。新增覆盖：`--accent-press` 存在、面板七处字号 = 14px、头部按钮 28×28、折叠槽 / 图标槽 14/16、三个图标常量已放大、悬浮球底色为 `--accent` 且图标纯白、`.pressing` 切橙、拖动时退回蓝；真实 Edge 段用**真实 `PointerEvent`** 验「按下 → 橙（`rgb(249,115,22)`）、开始拖动 → 蓝（`rgb(59,130,246)`）」。截图从一张扩到两张：`fs-tree.png`（放大的树）+ `fs-peek.png`（实心蓝悬浮球）。
+
+⚠️ 踩坑：探针脚本里已有 `var peek = document.getElementById('treePeek')`，新加的摆拍开关若也叫 `peek`，会被遮蔽 → 两张图**都走「球」分支**，PNG 的 MD5 一模一样、`fs-tree.png` 其实没拍到树。改用 `window.__peek`。**同名遮蔽不会报错，只会静默给出错误结果**——所以现在会比对两张图的 MD5。
+
+连同既有四套（`fm-unit` 95 + `fm-e2e` 87 + `bq-test` 58 + `ex-test` 262），**合计 740 条断言全绿**。

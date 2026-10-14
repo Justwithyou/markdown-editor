@@ -2395,9 +2395,9 @@ img { max-width: 100%; }`;
   // 就不再深挖、一律判定为「有」——宁可多留一个目录，也不因为预算用尽就错杀有文档的子树。
   const TREE_PROBE_MAX = 1500;
 
-  const ICON_CARET = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="9 6 15 12 9 18"/></svg>';
-  const ICON_DIR = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
-  const ICON_FILE = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><polyline points="14 3 14 8 19 8"/></svg>';
+  const ICON_CARET = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="9 6 15 12 9 18"/></svg>';
+  const ICON_DIR = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+  const ICON_FILE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><polyline points="14 3 14 8 19 8"/></svg>';
 
   const treePanel = $('#fileTreePanel');
   const treeBody = $('#fileTreeBody');
@@ -2541,7 +2541,7 @@ img { max-width: 100%; }`;
   function noteRow(text, depth, isError) {
     const el = document.createElement('div');
     el.className = 'tree-note' + (isError ? ' tree-error' : '');
-    el.style.paddingLeft = (10 + depth * 13) + 'px';
+    el.style.paddingLeft = (10 + depth * 15) + 'px';
     el.textContent = text;
     return el;
   }
@@ -2551,7 +2551,7 @@ img { max-width: 100%; }`;
     row.className = 'tree-row';
     row.dataset.path = node.path;
     row.dataset.kind = node.kind;
-    row.style.paddingLeft = (10 + depth * 13) + 'px';
+    row.style.paddingLeft = (10 + depth * 15) + 'px';
 
     // 文件行也占住折叠箭头那一列（空槽），否则同级的图标与文字会左右错开
     const lead = document.createElement('span');
@@ -2950,6 +2950,9 @@ img { max-width: 100%; }`;
       baseX = isNaN(p.x) ? 0 : p.x;
       baseY = isNaN(p.y) ? 0 : p.y;
       treePeek.classList.add('dragging');
+      // 「按到了」的反馈：蓝 → 橙。不用 :active —— pointerdown 里 preventDefault() 之后
+      // 浏览器不再派发 mousedown，:active 未必成立，显式加 class 才可控、可测。
+      treePeek.classList.add('pressing');
       try { treePeek.setPointerCapture(e.pointerId); } catch (err) {}
       e.preventDefault();
     });
@@ -2959,6 +2962,8 @@ img { max-width: 100%; }`;
       const dx = e.clientX - startX;
       const dy = e.clientY - startY;
       if (!moved && Math.abs(dx) + Math.abs(dy) < PEEK_DRAG_SLOP) return;
+      // 一旦位移过阈值就确定是在「拖」而不是在「点」——橙色退回蓝色
+      if (!moved) treePeek.classList.remove('pressing');
       moved = true;
       place(baseX + dx, baseY + dy);
     });
@@ -2967,6 +2972,7 @@ img { max-width: 100%; }`;
       if (!dragging) return;
       dragging = false;
       treePeek.classList.remove('dragging');
+      treePeek.classList.remove('pressing');
       try { if (e && e.pointerId != null) treePeek.releasePointerCapture(e.pointerId); } catch (err) {}
       if (moved) persist();
     }

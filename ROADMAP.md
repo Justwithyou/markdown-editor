@@ -100,7 +100,7 @@ await navigator.clipboard.writeText(editor.value);
 
 B 落地时对原评估做了两处修正：① 中式排版与 KaTeX / Mermaid 的清晰度问题其实可接受——`scale` 取 2（受画布面积上限约束时自动降到 1.5 / 1），切缝用 `findBlankCut()` 找全白行，不会拦腰截断文字；② 「体积大」这一条通过 `getContext('2d', { alpha: false })` + `toDataURL('image/jpeg', 0.92)` 压下来了（10 页从 PNG 的 68 MB 降到约 1.1 MB）。**唯一不可回避的代价是文字不可检索**，这条已写进 Toast 与文档，并引导「要可检索就用打印」。超长文档撞上画布上限时会**明确拒绝并提示改用打印**，不交出截断文件。
 
-注意：`css/style.css` 当时**完全没有 `@media print` 规则**（全文 0 处），走方案 A 必须补上，否则打印结果会带上顶栏、工具栏和编辑区。落地时已补齐——`@page { margin: 16mm }` 放在 `style.css:1626`（媒体查询**之外**），`@media print { … }` 主体在 `style.css:1630` 起，整段到文末 `:1712`。
+注意：`css/style.css` 当时**完全没有 `@media print` 规则**（全文 0 处），走方案 A 必须补上，否则打印结果会带上顶栏、工具栏和编辑区。落地时已补齐——`@page { margin: 16mm }` 放在 `style.css:1643`（媒体查询**之外**），`@media print { … }` 主体在 `style.css:1647` 起，整段到文末 `:1729`。
 
 #### 4. 导出 Word — 两方案二选一
 
@@ -111,11 +111,11 @@ B 落地时对原评估做了两处修正：① 中式排版与 KaTeX / Mermaid 
 
 ### 任务拆解
 
-- [x] 顶部新增「导出」下拉组件（HTML + CSS）：`#exportWrap` / `#btnExport` / `#exportMenu` + 5 个 `.export-item[data-export="md|html|pdf|word|print"]`，带 `role="menu"` / `aria-haspopup` / `aria-expanded`（`index.html:118–150`）
+- [x] 顶部新增「导出」下拉组件（HTML + CSS）：`#exportWrap` / `#btnExport` / `#exportMenu` + 5 个 `.export-item[data-export="md|html|pdf|word|print"]`，带 `role="menu"` / `aria-haspopup` / `aria-expanded`（`index.html:118–152`）
 - [x] 抽出 `buildStandaloneHtml()`（规划里叫 `exportHtml()`）：主题样式 + hljs 样式 + KaTeX 样式内联，并先做 `url()` 绝对化
 - [x] 实现复制 Markdown（含 `file://` / 非安全上下文下的 `execCommand('copy')` 降级路径）
 - [x] 实现导出 HTML：**文件名按「元数据 `title` → 首个 H1 → `document`」取**（规划只写了「取首个 H1」），非法字符清洗 + 80 字符截断
-- [x] 补充 `@media print` 样式（`style.css:1626` `@page` + `:1630` `@media print`），实现**「打印」**（原方案 A）
+- [x] 补充 `@media print` 样式（`style.css:1643` `@page` + `:1647` `@media print`），实现**「打印」**（原方案 A）
 - [x] **新增「导出 PDF」下载链路**（原方案 B）：`exportPdfFile()` 离屏渲染 → A4 切片 → JPEG → `jsPDF` → `downloadBlob()`；两个库懒加载，不点不拉
 - [x] 实现导出 Word（方案 A：`application/msword` + `.doc` 套壳；`WORD_COMPAT_CSS` 用 `pt` 兜底，元数据面板降级为两列表格）
 - [x] 五个动作统一接入 Toast 成功/失败反馈；「导出 PDF」的 Toast 会说明产物是图片、要可检索请用「打印」
@@ -193,7 +193,7 @@ cd .workbuddy/tools && npm i && node ex-test.js
 
 | 问题 | 代码依据 |
 |------|----------|
-| ~~无打印样式~~ | **F1 已补齐**：`css/style.css:1626` `@page` + `:1630` `@media print` |
+| ~~无打印样式~~ | **F1 已补齐**：`css/style.css:1643` `@page` + `:1647` `@media print` |
 | 无障碍属性覆盖极少 | 仅「导出」「打开」两个下拉带了 `role="menu"` / `aria-haspopup` / `aria-expanded`（`app.js:1619` / `:1651` 同步 `aria-expanded`）；其余按钮与弹窗仍无 `aria-label` / `role="dialog"` |
 | 字体栈缺兜底 | 编辑器使用 `JetBrains Mono / Fira Code / SF Mono / Cascadia Code`，多数机器未安装，实际回退到系统默认，观感不一致 |
 | 提示无分级 | `showToast(msg, type)` 支持 `success` / `error`，但调用处几乎只用 success；失败路径（如 URL 采集失败）反馈不足 |
@@ -666,7 +666,7 @@ F5 **不越界**：纯本地、不碰后端，与「非目标」中的「云同�
 - [x] **F5-a 修订** 树本身的「全部展开 / 全部收起」（展开逐个读盘，`TREE_EXPAND_MAX = 400` 封顶）
 - [x] **F5-a 修订** 打开文件 / 切换文档成功**不弹 Toast**（编码例外：非 UTF-8 / UTF-16 只读预览时必须提示）
 - [x] **F5-a 修订** 全屏预览**锁定当前设备档**（设备档整组隐藏；页宽仅在 PC 档出现）
-- [x] **F5-a 修订** 抽屉入口改为**可拖动的悬浮球**（44×44、主题色、投影、位置持久化 + 视口钳制）；头部去标题行、操作挂名字行尾、全树字号统一 13px
+- [x] **F5-a 修订** 抽屉入口改为**可拖动的悬浮球**（44×44、**实心蓝底 + 白图标、按下变橙**、投影、位置持久化 + 视口钳制）；头部去标题行、操作挂名字行尾、全树字号统一 **14px**（字号 / 图标同步放大）
 - [x] **F5-a 修订** 文件树只列 Markdown（枚举层过滤），**没有文档的目录连文件夹都不显示**（`hasMarkdownDeep()` 探测 + 快照模式 `prune()`），打开时只提示一句「仅显示 Markdown 文档」
 - [x] **F5-a 修订** 头部「收起」图标由 `×` 改为「面板 + 左向箭头」（叉号会被读成关闭 / 删除）
 - [x] **F5-a 修订** 「打开」与「导出」两个下拉收缩到内容宽（去掉 `min-width: 216px` 与 `.export-ext` 的 `margin-left: auto`）
@@ -731,7 +731,7 @@ F5 **不越界**：纯本地、不碰后端，与「非目标」中的「云同�
 |---|------|------|
 | 1 | **抽屉把手太不明显** | `.tree-peek` 重写：18×42、`top:50%` + `translateY(-50%)` 垂直居中、只留右半圆角、主题色底与字色，悬停加深加宽 ※**下一轮已改为可拖动的悬浮球** |
 | 2 | **只展示 MD，并报「已过滤」** | 过滤下沉到枚举层（`isMdName()` 不过关就 `filtered++` 且不入队，快照模式同理由 `buildSnapshotTree()` 处理）；目录行首出「已过滤 N 个非 Markdown 文件」，无 MD 时补「（无 Markdown 文档）」 ※**下一轮已改为「不报数 + 空目录整条不显示」** |
-| 3 | **去掉「文件树」标题行，操作挂名字行尾，字号统一** | 头部只剩 `.tree-head`（工作区名 + 四个 `.tree-btn`）；全树字号统一 13px（原来提示行是 12px） |
+| 3 | **去掉「文件树」标题行，操作挂名字行尾，字号统一** | 头部只剩 `.tree-head`（工作区名 + 四个 `.tree-btn`）；全树字号统一 13px（原来提示行是 12px） ※**下一轮已提到 14px，图标同步放大** |
 | 4 | **两个下拉太宽、中间留白** | `.export-menu` 改 `width: max-content`（去掉 216px 下限），`.export-item .export-ext` **去掉 `margin-left: auto`**——中缝的真正成因；实测两个下拉 172–174px |
 | 5 | **「导出 PDF」与「打印」拆开** | 「导出 PDF」改走 `exportPdfFile()`（离屏渲染 → A4 切片 → JPEG → `jsPDF` → **直接下载**）；另立「打印」走原 `printDocument()`。两个库首次点击才懒加载，`index.html` 常量依赖计数不变 |
 
@@ -749,15 +749,28 @@ F5 **不越界**：纯本地、不碰后端，与「非目标」中的「云同�
 | 2 | **头部的 `×` 有歧义** | 换成「面板 + 左向箭头」：`×` 在这个位置会被读成「关闭 / 删除」，而它做的只是把抽屉折回边缘 |
 | 3 | **把手改成可拖动的悬浮球** | `.tree-peek` 从「贴左缘、18×42、只有右半圆角」改为 **44×44 正圆 + 投影**；指针事件拖动（`setPointerCapture`），**位移 < `PEEK_DRAG_SLOP`（4px）才算一次点击**——拖完不会顺手把抽屉弹开；位置存 `mdtu-tree-peek-pos`，`resize` 时重新钳回视口 |
 
-**验证（本轮）**：`fs-test.js` 扩到 **222 条**（静态 89 / jsdom 70 / 真实 Edge 63），连同既有四套（`fm-unit` 95 + `fm-e2e` 87 + `bq-test` 58 + `ex-test` 262），**合计 724 条断言全绿**。新增覆盖：`assets` 这种「整棵没有 Markdown」的目录不在树里、`hasMarkdownDeep()` 的早退（`notes` 探到 `x.md` 就不再往下读 `sub`）、探测预算存在、悬浮球的 44×44 正圆 / 投影 / 拖动改写位置 / 拖后不弹抽屉 / 位置落库、`×` 图标确已换掉。
+**验证（本轮）**：`fs-test.js` 扩到 **222 条**（静态 89 / jsdom 70 / 真实 Edge 63），连同既有四套（`fm-unit` 95 + `fm-e2e` 87 + `bq-test` 58 + `ex-test` 262），**合计 724 条断言全绿**（※第四轮为 740 条）。新增覆盖：`assets` 这种「整棵没有 Markdown」的目录不在树里、`hasMarkdownDeep()` 的早退（`notes` 探到 `x.md` 就不再往下读 `sub`）、探测预算存在、悬浮球的 44×44 正圆 / 投影 / 拖动改写位置 / 拖后不弹抽屉 / 位置落库、`×` 图标确已换掉。
 
 > **一个被有意接受的代价**：为了让「空壳目录」在点开之前就消失，枚举时**必须**向下读一层。所以「未展开的子目录一次都不枚举」这条性质不再成立——现在是「未展开的子目录只被**探**一层、内容不进 DOM」，测试里的 `__listed` 计数也据此改写。为了不让这件事失控，探测带早退与预算双保险：常规文档目录只读几个条目，预算用尽则退回旧行为（保守保留）。
+
+### 落地记录（F5-a 第四轮：字号图标放大 / 悬浮球配色，2026-10-14 晚）
+
+两条用户反馈（明细与取舍见 [F5-FOLDER-MODE.md §11.8](./F5-FOLDER-MODE.md)）：
+
+| # | 调整 | 做法 |
+|---|------|------|
+| 1 | **「文件树面板的字体、图标都调大一些，看起来好小」** | 全树文字 13px → **14px**（七处一起改、仍保证同号）；图标 `ICON_CARET` 12 / `ICON_DIR` 15 / `ICON_FILE` 14；头部四个 `.tree-btn` 24×24 → **28×28**、内联 SVG 16×16；折叠箭头槽 14、图标槽 16、缩进步长 `depth * 15`、行内边距 5/12 |
+| 2 | **「悬浮球背景色直接改成蓝色，点击时动态切换到橙色」** | `.tree-peek` 由浅底 `--accent-light` 改为**实心 `--accent` 蓝 + 白图标**；`:root` 新增 `--accent-press: #f97316`，按下挂 `.pressing` 切橙。**不用 `:active`**——`pointerdown` 里 `preventDefault()` 之后 `:active` 未必成立，JS 显式管 class 才可控可测。位移过 `PEEK_DRAG_SLOP` 即摘掉 `.pressing`，于是「点击 = 橙、拖动 = 蓝」可分辨 |
+
+**验证（本轮）**：`fs-test.js` 扩到 **238 条**（静态 97 / jsdom 73 / 真实 Edge 68），连同既有四套（`fm-unit` 95 + `fm-e2e` 87 + `bq-test` 58 + `ex-test` 262），**合计 740 条断言全绿**。真实 Edge 段用真 `PointerEvent` 验「按下 → 橙 `rgb(249,115,22)`、开始拖动 → 蓝 `rgb(59,130,246)`」。截图由一张扩到两张：`fs-tree.png`（放大的树）+ `fs-peek.png`（实心蓝悬浮球）。
+
+> **踩坑（同名遮蔽）**：探针脚本里已有 `var peek = document.getElementById('treePeek')`，新加的摆拍开关若也取名 `peek`，会被它遮蔽 → 两张截图**都走「球」分支**，PNG 的 MD5 一模一样、`fs-tree.png` 其实没拍到树。改用 `window.__peek`。**这种遮蔽不报错，只静默给错结果**——所以现在会比对两张图的 MD5。
 
 ---
 
 ## F6 · 预览模式（设备档）
 
-> **状态：✅ 已实现**（2026-10-13）。落地文件：`index.html`（预览工具栏的 `#deviceGroup` 一组平铺档位按钮，`index.html:265–271`）、`css/style.css`（`/* ===== Preview Mode: 设备端 =====` 段，style.css:526 起；按钮组样式在 `.seg-btn` 1349 / `.seg-group` 1364 处）、`js/app.js`（`// ===== Preview Mode: 设备端 =====` 段，app.js:872 起）。**零新增依赖**（档位就是原生 `<button>`，没有引入任何 UI 库）。
+> **状态：✅ 已实现**（2026-10-13）。落地文件：`index.html`（预览工具栏的 `#deviceGroup` 一组平铺档位按钮，`index.html:265–271`）、`css/style.css`（`/* ===== Preview Mode: 设备端 =====` 段，style.css:527 起；按钮组样式在 `.seg-btn` 1351 / `.seg-group` 1381 处）、`js/app.js`（`// ===== Preview Mode: 设备端 =====` 段，app.js:872 起）。**零新增依赖**（档位就是原生 `<button>`，没有引入任何 UI 库）。
 >
 > 落地后的设计说明已并入 [DESIGN §7.9 预览模式](./DESIGN.md)；本章保留规划背景、交互取舍与实测记录。
 
