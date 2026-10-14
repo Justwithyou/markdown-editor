@@ -78,18 +78,32 @@
       </button>
     </div>
     <div class="header-right">
-      <!-- F5 文件夹模式入口。默认 hidden：不支持相关 API 的浏览器（Firefox / Safari）
-           由 app.js 直接把这个节点整块摘掉，而不是渲染出来再报错 -->
-      <button class="header-btn" id="btnOpenFolder" hidden title="打开本地文件夹（浏览工作区内的 Markdown 文档）">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><line x1="7" y1="12.5" x2="17" y2="12.5"/><line x1="7" y1="16" x2="13" y2="16"/></svg>
-        <span>文件夹</span>
-      </button>
+      <!-- 「打开」下拉：把「文件 / 文件夹」两个入口收进一个菜单，顶栏不再横向膨胀。
+           刻意复用 .export-wrap / .export-menu / .export-item —— 与导出下拉共用同一套骨架，
+           样式表里只补 active 与 [hidden] 两条规则。
+           #btnOpenFolder 仍带 hidden：不支持相关 API 的浏览器里由 app.js 把整个节点摘掉；
+           连它都没了的时候（Firefox / Safari），菜单只剩「文件」一项，箭头由 JS 收掉。 -->
+      <div class="export-wrap" id="openWrap">
+        <button class="header-btn" id="btnOpen" title="打开本地文件 / 文件夹" aria-haspopup="menu" aria-expanded="false">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          <span>打开</span>
+          <svg class="export-caret" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div class="export-menu" id="openMenu" role="menu" aria-label="打开">
+          <button class="export-item" role="menuitem" id="btnOpenFile" title="打开本地 Markdown 文件">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span>文件</span>
+            <span class="export-ext">.md</span>
+          </button>
+          <button class="export-item" role="menuitem" id="btnOpenFolder" hidden title="打开本地文件夹（浏览工作区内的 Markdown 文档）">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><line x1="7" y1="12.5" x2="17" y2="12.5"/><line x1="7" y1="16" x2="13" y2="16"/></svg>
+            <span>文件夹</span>
+            <span class="export-ext">工作区</span>
+          </button>
+        </div>
+      </div>
       <!-- 只读降级通道：不支持 File System Access API 时改走这条（非安全上下文下也可用） -->
       <input type="file" id="folderInput" webkitdirectory style="display:none;">
-      <button class="header-btn" id="btnOpenFile" title="打开本地 Markdown 文件">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-        <span>打开</span>
-      </button>
       <input type="file" id="fileInput" accept=".md,.markdown,.txt,.mdx" style="display:none;">
       <button class="header-btn" id="btnLinks" title="Markdown 在线工具与开源项目导航">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
@@ -424,6 +438,12 @@
     <div class="outline-header">
       <span>文件树<span class="tree-mode" id="treeMode"></span></span>
       <span class="tree-head-actions">
+        <button class="outline-close" id="treeExpandAll" title="全部展开">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 9 12 4 17 9"/><polyline points="7 15 12 20 17 15"/></svg>
+        </button>
+        <button class="outline-close" id="treeCollapseAll" title="全部收起">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 4 12 9 17 4"/><polyline points="7 20 12 15 17 20"/></svg>
+        </button>
         <button class="outline-close" id="treePickBtn" data-tree-pick="1" title="选择 / 更换文件夹">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><line x1="12" y1="10.5" x2="12" y2="16.5"/><line x1="9" y1="13.5" x2="15" y2="13.5"/></svg>
         </button>
@@ -433,6 +453,13 @@
     <div class="outline-body tree-body" id="fileTreeBody"></div>
     <div class="tree-resizer" id="treeResizer" title="拖动调整宽度"></div>
   </div>
+
+  <!-- 抽屉收起后的「拉出」把手：只在「已经打开过工作区 + 抽屉处于收起」时出现。
+       把「隐藏之后怎么找回来」变成一个一眼可见的动作，而不是让人记得去顶栏菜单里翻。
+       不支持文件夹 API 时与抽屉一起被摘掉。 -->
+  <button class="tree-peek" id="treePeek" hidden title="展开文件树">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+  </button>
 
   <!-- Floating Outline Panel -->
   <div class="outline-panel" id="outlinePanel">

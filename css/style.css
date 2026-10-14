@@ -253,6 +253,28 @@ body {
   color: var(--text-muted);
 }
 
+/* 「打开」下拉复用上面这套骨架，只补三条：
+   1) 菜单项也能表示「开关已开」（文件夹抽屉正在展开时）
+   2) 能力不足时 #btnOpenFolder 带 hidden —— 必须压过 .export-item 的 display:flex
+   3) 菜单里只剩一项时把箭头收掉，避免看着像个空下拉 */
+.export-item.active {
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.export-item.active svg {
+  color: var(--accent);
+}
+
+.export-item[hidden] {
+  display: none !important;
+}
+
+#openWrap.single .export-caret {
+  display: none;
+}
+
 /* ===== Main Layout ===== */
 .app-main {
   flex: 1;
@@ -1154,6 +1176,40 @@ body {
   display: none !important;
 }
 
+/* 抽屉收起后的把手：贴左缘竖着的一条，只在「有工作区 + 抽屉收起」时出现。
+   定位用 fixed，避开 .app-main 的 flex 布局；z-index 低于抽屉本身（800）与顶栏。
+   观感与 .file-tree-panel 一致（同样一块毛玻璃），点一下就把抽屉拉回来。 */
+.tree-peek {
+  position: fixed;
+  left: 0;
+  top: calc(var(--header-height) + 12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 54px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-left: none;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: rgba(255, 255, 255, .82);
+  backdrop-filter: blur(14px) saturate(1.7);
+  -webkit-backdrop-filter: blur(14px) saturate(1.7);
+  color: var(--text-secondary);
+  cursor: pointer;
+  z-index: 790;
+  transition: color .15s ease, background .15s ease;
+}
+
+.tree-peek:hover {
+  color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.tree-peek[hidden] {
+  display: none !important;
+}
+
 @media (max-width: 768px) {
   .file-tree-panel {
     left: 8px;
@@ -1528,7 +1584,8 @@ body {
   .preview-toolbar,
   .outline-panel,
   .toast,
-  .modal-overlay {
+  .modal-overlay,
+  .tree-peek {
     display: none !important;
   }
 

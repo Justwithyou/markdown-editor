@@ -2,9 +2,10 @@
 
 > **文档定位**：本文是 [ROADMAP.md](./ROADMAP.md) 中 **F5** 的完整设计方案，描述「**要做什么**」；与描述「**当前是什么**」的 [DESIGN.md](./DESIGN.md) 分工明确。落地完成后，本文中仍然成立的结论应合并进 DESIGN.md，本文则归档。
 >
-> **状态**：🟦 **F5-a 已实现**（2026-10-13，分支 `feature-folder`）；F5-b / F5-c / F5-d 待做。落地详情见 §11，与规划不一致之处也在那一节列明。
+> **状态**：🟦 **F5-a 已实现**（2026-10-13 落地、2026-10-14 修订，分支 `feature-folder`）；F5-b / F5-c / F5-d 待做。落地详情见 §11，与规划不一致之处也在那一节列明。
 >
 > §9.1 的三项待拍板已确认（见该节），§9.4 的前置验证已由用户手动确认通过。
+> 2026-10-14 复核后，**`move()` 那条「近似原子写入」路线已废弃**——`createWritable()` 自带该语义，见 §3.8。
 
 ---
 
@@ -61,11 +62,11 @@
 
 | # | 假设点 | 代码位置 | 现状 | 改造方向 |
 |---|--------|----------|------|----------|
-| 1 | 正文只有一份 | `saveContent()` / `loadContent()`（app.js:1994 / 1998） | 固定读写 `localStorage['mdtu-content']` 一个键 | 拆出「按文档 id 存取」层，与单文档模式并存 |
+| 1 | 正文只有一份 | `saveContent()` / `loadContent()`（app.js:2036 / 2040） | 固定读写 `localStorage['mdtu-content']` 一个键 | 拆出「按文档 id 存取」层，与单文档模式并存 |
 | 2 | 输入即全量落库 | `editor.addEventListener('input')` → `saveContent()`（app.js:1383） | 无「当前文档」概念，无脏标记 | 引入 `currentDoc` 与 `dirty` 状态 |
-| 3 | `Ctrl+S` 只写 localStorage | app.js:1871 | 项目至今**没有任何写回磁盘的能力** | 文件夹模式下语义升级为「写磁盘」 |
-| 4 | 打开文件即覆盖 | app.js:1491–1509 | 读入后直接赋 `editor.value`；`file.name` 只在 Toast 里出现一次（app.js:1504），不保存 | 保留为兜底入口，新增路径要记文档身份 |
-| 5 | 编码固定 UTF-8 | `reader.readAsText(file, 'utf-8')`（app.js:1507） | 单文档模式下 GBK 文件**已经会乱码** | 改为 ArrayBuffer + BOM 嗅探（见 §6.4） |
+| 3 | `Ctrl+S` 只写 localStorage | app.js:1913 | 项目至今**没有任何写回磁盘的能力** | 文件夹模式下语义升级为「写磁盘」 |
+| 4 | 打开文件即覆盖 | app.js:1515–1537 | 读入后直接赋 `editor.value`；`file.name` 不外传、也不保存 | 保留为兜底入口，新增路径要记文档身份 |
+| 5 | 编码固定 UTF-8 | `reader.readAsText(file, 'utf-8')`（app.js:1535） | 单文档模式下 GBK 文件**已经会乱码** | 改为 ArrayBuffer + BOM 嗅探（见 §6.4） |
 
 ### 2.2 最有利的一条：渲染层是纯函数
 
@@ -82,8 +83,8 @@ renderMarkdown();            // 其余全自动
 
 | 落点 | 位置 | 可复用之处 |
 |------|------|------------|
-| `.outline-panel`（文档大纲浮层） | app.js:1621 / 1766 | 已是「右侧浮层 + `.show` 切换」的成熟模式，文件树可照搬这套结构与样式 |
-| 顶栏右侧按钮组 | DESIGN §5.1 | 「打开文件夹」应紧邻现有「打开文件」（app.js:1490） |
+| `.outline-panel`（文档大纲浮层） | app.js:1663 / 1808 | 已是「右侧浮层 + `.show` 切换」的成熟模式，文件树可照搬这套结构与样式 |
+| 顶栏右侧按钮组 | DESIGN §5.1 | 「打开文件」的既有落点在 app.js:1515；2026-10-14 起它与新增的「打开文件夹」一起收进顶栏「打开」下拉，不再各占一个按钮 |
 | `.resizer` 分栏 | DESIGN §5.2 | 若文件树做左侧抽屉，宽度可复用这套拖拽逻辑 |
 
 ### 2.4 项目级约束
@@ -134,7 +135,7 @@ renderMarkdown();            // 其余全自动
 | 原型 | 自有方法（`Object.getOwnPropertyNames`） |
 |------|------------------------------------------|
 | `FileSystemHandle` | `kind, name, isSameEntry, queryPermission, remove, requestPermission` |
-| `FileSystemFileHandle` | `createWritable, getFile, **move**` |
+| `FileSystemFileHandle` | `createWritable, getFile, move`（`move` 见下方说明） |
 | `FileSystemDirectoryHandle` | `getDirectoryHandle, getFileHandle, removeEntry, resolve, entries, keys, values` |
 | `FileSystemWritableFileStream` | `write`（已断言；`seek` / `truncate` 未单独断言） |
 
@@ -142,7 +143,7 @@ renderMarkdown();            // 其余全自动
 
 | 能力 | 实测 | 对设计的意义 |
 |------|------|--------------|
-| `FileSystemFileHandle.prototype.move` | **`function`**（基类与目录句柄上均为 `undefined`） | 「写 `*.tmp` → **改名覆盖**」的近似原子写入**可行**（§6.3）；`move` 只存在于文件句柄 |
+| `FileSystemFileHandle.prototype.move` | 运行时**存在**（`function`；基类与目录句柄上为 `undefined`） | ⚠️ **但它是非标准的历史遗留、不该用**——见 §3.8。写回不需要它，`createWritable()` 本身就是「写临时文件 → 关闭时替换」 |
 | `FileSystemDirectoryHandle.prototype.resolve` | `function` | 可由句柄反算相对路径，作为**文档 id**（§6.2） |
 | `encode` 嗅探：`new TextDecoder('utf-8',{fatal:true})` | `ok` | 「严格解码失败即判非 UTF-8」这条防线成立（§6.4） |
 | `new TextDecoder('gbk')` | `ok` | 非 UTF-8 文件可**只读预览**，且**无需任何新依赖** |
@@ -176,11 +177,31 @@ ROADMAP **F1** 中写：
 | 0 | 自动列出环境与原型清单（等价于 §3.3 / §3.5 的表） |
 | ① | **真实点击**触发 `showDirectoryPicker()` → 回答 §3.4 的残留不确定性 |
 | ② | 写入 → 关闭 → 回读比对 → 删除，验证写回全链路 |
-| ③ | 创建两个文件后 `move()` 覆盖，**实测目标已存在时是被覆盖还是报错** |
+| ③ | 创建两个文件后 `move()` 覆盖（**已失去必要性**，见 §3.8；这一步留着只为核对 Chromium 的遗留行为） |
 | ④ | 离线自测编码嗅探（ASCII / UTF-8 / UTF-8+BOM / GBK / UTF-16LE） |
 
 > ②③ 会在选中目录里创建 `__mdtu_probe_*` 临时文件并自行清理——**请选一个无关紧要的临时目录**。
-> 步骤 ③ 的结果要回填到 §6.3 与 §9。
+> 步骤 ③ 的结果只需回填到 §3.8；§6.3 已不再依赖它。
+
+### 3.8 ⚠️ `move()` 不能用，而 `createWritable()` 已经够用（2026-10-14 复核）
+
+§3.5 观察到 Edge 的 `FileSystemFileHandle.prototype.move` 是个 `function`，于是原方案打算用「写 `xxx.md.tmp` → `move()` 覆盖」来做近似原子写入。**复核后这条路线应当放弃**：
+
+| 检查点 | 结果 |
+|--------|------|
+| WHATWG File System 现行标准 | `FileSystemHandle` 只有 `isSameEntry()`；`FileSystemFileHandle` 只有 `getFile()` / `createWritable()` / `createSyncAccessHandle()`。**没有 `move()`** |
+| MDN `FileSystemHandle` 方法表 | `isSameEntry` / `queryPermission` / `remove` / `requestPermission`——**没有 `move()`** |
+| MDN `/Web/API/FileSystemFileHandle/move` | **页面已不存在**（404）。该方法属于 WICG 时代的实验性 API，只在 Chromium 里落地过，后来被撤回 |
+
+也就是说：`move()` 是 Chromium 里的一枚**历史遗留函数**，不是标准的一部分，行为与去留都不受承诺——拿它做数据安全的支点不合适。
+
+**而真正要的那件事，`createWritable()` 本身就做了。** MDN 对 `createWritable()` 的原文：
+
+> Any changes made through the stream won't be reflected in the file represented by the file handle until the stream has been closed. **This is typically implemented by writing data to a temporary file, and only replacing the file represented by file handle with the temporary file when the writable file stream is closed.**
+
+即：写入先落在临时文件里，`close()` 那一刻才替换目标文件。§6.3 的 `saveDoc()` 已经是这个形状（`createWritable()` → `write()` → `close()`），**不需要额外写 `.tmp`、更不需要 `move()`**。F5-b 反而因此简化了一条。
+
+> 顺带：`mode` 选项值得用起来——`createWritable({ mode: 'exclusive' })` 时，第二个写入者会拿到 `NoModificationAllowedError`，正好把「同一个文件在两个标签页里同时写」这件事从静默互相覆盖变成显式报错。
 
 ---
 
@@ -233,11 +254,11 @@ ROADMAP **F1** 中写：
             唯一接口： editor.value = N;  renderMarkdown();
                             │
 【要改】状态与 IO 层 —— 真正的单文档假设
-    saveContent() / loadContent()    app.js:1994 / 1998   → 按文档 id 存取
+    saveContent() / loadContent()    app.js:2036 / 2040   → 按文档 id 存取
     editor 'input' → saveContent()   app.js:1383          → 增加脏标记
-    Ctrl+S                           app.js:1871          → 写回磁盘
-    btnOpenFile / fileInput          app.js:1491–1509     → 保留为兜底入口
-    readAsText(file, 'utf-8')        app.js:1507          → BOM 嗅探 + 严格解码
+    Ctrl+S                           app.js:1913          → 写回磁盘
+    btnOpenFile / fileInput          app.js:1515–1537     → 保留为兜底入口
+    readAsText(file, 'utf-8')        app.js:1535          → BOM 嗅探 + 严格解码
                             │
 【要新建】文件系统层 + UI 层
     fs-workspace   目录枚举（懒加载 / 忽略规则）· 读 · 写 · 改名 · 删除
@@ -358,6 +379,8 @@ async function saveDoc(path, text) {
   const fh = await resolveFileHandle(path);
   // 换行符还原（见 §6.4）
   const out = eol.restore(text);
+  // createWritable() 本身就是「写临时文件 → close() 时替换目标」，
+  // 所以下面三行已经是近似原子写入，不需要先写 .tmp 再改名（§3.8）
   const w = await fh.createWritable();
   await w.write(out);
   await w.close();
@@ -369,13 +392,14 @@ async function saveDoc(path, text) {
 | **默认行为** | `Ctrl+S` 显式保存（§5.3） |
 | **自动写回** | 可开关，**默认关**；开启后走 `debounce` 800–1200ms |
 | **`.bak` 保护** | 首次接管某文件时先写一份 `xxx.md.bak` 一次（已存在则不覆盖） |
-| **近似原子写入** | `move()` 实测**只在 `FileSystemFileHandle` 上存在**：可「写 `xxx.md.tmp` → `move()` 覆盖」。**但「目标已存在时是覆盖还是报错」尚未实测**（§3.7 步骤 ③ 专门回答它） |
+| **落盘方式** | 只用 `createWritable()` → `write()` → `close()`。MDN 明确「实现上就是先写临时文件、`close()` 时替换」——**这就是近似原子写入**，不需要 `move()`（§3.8 已论证 `move()` 非标准、不该依赖） |
+| **多标签页同写** | `createWritable({ mode: 'exclusive' })`：第二个写入者拿到 `NoModificationAllowedError`，把静默互相覆盖变成显式报错 |
 | **写失败** | 保持 `dirty` 状态不摘除，Toast 报错，**绝不静默吞掉** |
 | **只读兜底** | 用 `webkitdirectory` 路径进来的会话，保存入口置灰并提示原因 |
 
 ### 6.4 编码与换行符（F5-b，**数据安全的重点**）
 
-现状 `reader.readAsText(file, 'utf-8')`（app.js:1507）**已经把 GBK 文件读成乱码**了。文件夹模式要写回，这个坑会从「看着难受」升级为「**把用户原文件毁掉**」，必须一并解决。
+现状 `reader.readAsText(file, 'utf-8')`（app.js:1535）**已经把 GBK 文件读成乱码**了。文件夹模式要写回，这个坑会从「看着难受」升级为「**把用户原文件毁掉**」，必须一并解决。
 
 #### 读取流程
 
@@ -482,7 +506,7 @@ try {
 
 | # | 风险 | 影响 | 缓解 |
 |---|------|------|------|
-| 1 | **写回覆盖不可逆** | **极高**（丢用户数据） | `Ctrl+S` 默认手动；首次接管写 `.bak`；`move()` 近似原子写入；不静默吞错 |
+| 1 | **写回覆盖不可逆** | **极高**（丢用户数据） | `Ctrl+S` 默认手动；首次接管写 `.bak`；落盘走 `createWritable()` 的「临时文件 → close 替换」（§3.8）；`mode: 'exclusive'` 挡住多标签页同写；不静默吞错 |
 | 2 | **非 UTF-8 文件被写回** | **极高**（原文件变乱码） | 严格解码失败即**关闭写回通道**，只读打开（§6.4 红线） |
 | 3 | 换行符未保留 | 中（整个文件 diff 全红） | 读入瞬间记录主行尾与末尾换行（§6.4） |
 | 4 | 权限不持久导致体验割裂 | 中 | 「最近打开的文件夹」+ IndexedDB 句柄 + 一键恢复访问 |
@@ -556,11 +580,19 @@ try {
 >
 > 另有一项交互决定：**文件树做成左侧毛玻璃抽屉、默认收起**（用户选定），复用 `.outline-panel` 的浮层骨架，不新造第三栏。
 
+**2026-10-14 追加的三项决定**（第一版 F5-a 落地后用户提出）：
+
+| # | 问题 | 用户决定 |
+|---|------|----------|
+| 4 | 「打开」与「文件夹」两个顶栏按钮怎么摆 | **收进一个下拉**，菜单项改叫「**文件**」「**文件夹**」——顶栏不再横向膨胀（§11.3 / §11.5） |
+| 5 | 切换文档之后的存档 | **沿用 `saveContent()`**（写 `mdtu-content`，刷新仍停在这篇）；F5-b 再换成「按文档存取」的持久化层（§11.2） |
+| 6 | 抽屉与树的显示控制 | 抽屉要**能收也能拉回来**（菜单开关 + `×` + 左缘把手）；树要**全部展开 / 全部收起**（§11.5） |
+
 ### 9.2 需要在实现中实测确认的
 
 | # | 待确认 | 何时确认 |
 |---|--------|----------|
-| 1 | `move()` 在**目标已存在**时是覆盖还是报错 | F5-b 前，用 `fsa-probe.html` 步骤 ③ |
+| 1 | ~~`move()` 在**目标已存在**时是覆盖还是报错~~ **已消解**：`move()` 非标准、不该用；`createWritable()` 自带「临时文件 → close 替换」（§3.8） | 不需要了 |
 | 2 | `createWritable()` 中断后目标文件的残留状态 | F5-b 中 |
 | 3 | 大目录（5000+ 文件）下 `entries()` 的实际耗时 | F5-a 中 |
 
@@ -570,7 +602,7 @@ try {
 |------------|------|------|
 | `file://` 下能不能用？ | **能** | §3.3 三组对照实测 |
 | 需不需要额外依赖？ | **不需要**，含 GBK 解码 | §3.5 |
-| 有没有原子写入的可能？ | **有**（文件句柄 `move`） | §3.5，覆盖语义待测 |
+| 有没有原子写入的可能？ | **有**，而且是现成的：`createWritable()` 先写临时文件、`close()` 时替换目标 | §3.8（`move()` 那条路已废弃） |
 | 文件树要不要新造侧栏？ | **不要**，复用 `.outline-panel` 模式 | §2.3 / §5.2 |
 | 要不要缓存整个 vault？ | **不要**，只存未保存草稿 | §6.2 |
 
@@ -590,7 +622,8 @@ try {
 
 - [MDN：File System Access API](https://developer.mozilla.org/zh-CN/docs/Web/API/File_System_API)
 - [MDN：window.showDirectoryPicker()](https://developer.mozilla.org/zh-CN/docs/Web/API/Window/showDirectoryPicker)
-- [MDN：FileSystemFileHandle.move()](https://developer.mozilla.org/zh-CN/docs/Web/API/FileSystemFileHandle/move)
+- [MDN：FileSystemFileHandle.createWritable()](https://developer.mozilla.org/zh-CN/docs/Web/API/FileSystemFileHandle/createWritable)——「先写临时文件、`close()` 时替换」那句原文在这里（§3.8）
+- [MDN：FileSystemHandle](https://developer.mozilla.org/zh-CN/docs/Web/API/FileSystemHandle)——现行方法表里**没有 `move()`**（§3.8）
 - [MDN：FileSystemHandle.requestPermission()](https://developer.mozilla.org/zh-CN/docs/Web/API/FileSystemHandle/requestPermission)
 - [MDN：FileSystemObserver](https://developer.mozilla.org/zh-CN/docs/Web/API/FileSystemObserver)
 - [web.dev：The File System Access API](https://web.dev/articles/file-system-access)
@@ -600,16 +633,16 @@ try {
 
 ---
 
-## 11. 落地记录（F5-a，2026-10-13）
+## 11. 落地记录（F5-a，2026-10-13；2026-10-14 修订）
 
 ### 11.1 落地面
 
 | 文件 | 改动 |
 |------|------|
-| `index.html` | 顶栏 `#btnOpenFolder`（默认 `hidden`，能力不足时连节点一起摘掉）+ 只读降级用的 `#folderInput[webkitdirectory]` + 左侧抽屉 `#fileTreePanel` |
-| `css/style.css` | 新增 `/* ===== F5：文件树抽屉 =====` 段（复用 `.outline-panel`，覆盖成左侧毛玻璃抽屉 + 行样式 + 宽度把手）；**顺带修掉顶栏溢出**（见 11.3） |
-| `js/app.js` | 末尾新增 `// ===== F5：文件夹模式（只读）=====` 段（约 430 行），并在 `init()` 里调一次 `initFolderMode()` |
-| `.workbuddy/tools/fs-test.js` | 新增回归套件 **104 条**（工具目录，不进仓库） |
+| `index.html` | 顶栏「打开」下拉（`#openWrap` / `#btnOpen` / `#openMenu`，内含 **`#btnOpenFile`（文件）** 与 **`#btnOpenFolder`（文件夹）**；后者默认 `hidden`，能力不足时连节点一起摘掉）+ 只读降级用的 `#folderInput[webkitdirectory]` + 左侧抽屉 `#fileTreePanel`（标题栏带「全部展开 / 全部收起 / 选择文件夹 / `×`」）+ 抽屉收起后的左缘把手 `#treePeek` |
+| `css/style.css` | 新增 `/* ===== F5：文件树抽屉 =====` 段（复用 `.outline-panel`，覆盖成左侧毛玻璃抽屉 + 行样式 + 宽度把手 + 把手 `.tree-peek`）+ `#openWrap.single .export-caret`；**顺带修掉顶栏溢出**（见 11.3） |
+| `js/app.js` | 末尾新增 `// ===== F5：文件夹模式（只读）=====` 段（约 500 行），并在 `init()` 里调一次 `initFolderMode()`；「打开」下拉的开关逻辑在 `setOpenMenu()` 附近 |
+| `.workbuddy/tools/fs-test.js` | 新增回归套件（初版 104 条，修订后 **155 条**；工具目录，不进仓库） |
 
 ### 11.2 与规划的差异（都是有意的）
 
@@ -620,23 +653,42 @@ try {
 | §6.1 的忽略/排序/空目录/失败占位 | 全部落地 | — |
 | §6.1「非文本文件可切换为隐藏」 | **不做**，只灰显 | 属于「忽略规则面板」的一部分，随 F5-c 一起做 |
 | §6.7「切换文档含未保存内容确认」 | **不做确认** | 本期不写盘，切换不会丢任何已存盘内容，每次点文件都弹一次确认反而碍事；F5-b 随脏标记一起做 |
-| §6.2 的「文档 id / 草稿暂存 / 最近打开」 | **不做** | 都属于 F5-b 的持久化层；本期切换后仍走 `saveContent()` 写 `mdtu-content`，刷新停在这篇 |
+| §6.2 的「文档 id / 草稿暂存 / 最近打开」 | **不做** | 都属于 F5-b 的持久化层；本期切换后仍走 `saveContent()` 写 `mdtu-content`，刷新停在这篇（**2026-10-14 用户确认沿用此做法**） |
 | §5.2 的「默认收起 + 可拖宽」 | 落地 | 宽度存 `mdtu-tree-width`（180–640px） |
 
 ### 11.3 顺带修掉的既有回归：顶栏溢出
 
 实测 1280px 宽下 `.app-header` 是 `scrollWidth 1395 / clientWidth 1248`——**在 F5 之前**，`#btnExport` 与 `#btnCopy` 就已经落到可视区之外了。新增「文件夹」入口后又把「外链转脚注」挤了出去。
 
-修法：`.header-left` / `.header-right` 设 `flex-shrink: 0`，`.header-center` 加 `min-width: 0; overflow-x: auto; justify-content: safe center`——**中间那组退化成可横向滚动的条，右侧主操作（文件夹 / 打开 / 导出 / 复制）永不缺席**。`safe` 关键字是必需的：居中溢出会把左端裁掉且滚不回去。这条与 `.editor-toolbar` 的既有做法一致，已写进 DESIGN §5.1。
+两步修法：
+
+1. **布局兜底**：`.header-left` / `.header-right` 设 `flex-shrink: 0`，`.header-center` 加 `min-width: 0; overflow-x: auto; justify-content: safe center`——中间那组退化成可横向滚动的条，右侧主操作永不缺席。`safe` 关键字是必需的：居中溢出会把左端裁掉且滚不回去。这条与 `.editor-toolbar` 的既有做法一致，已写进 DESIGN §5.1。
+2. **入口收拢（2026-10-14）**：把「打开」与「文件夹」两个按钮收进一个**下拉**（「打开 → 文件 / 文件夹」），顶栏按钮数回到 F5 之前的水平——**根治**了「每加一个入口就挤掉一个」这件事，而不是继续靠滚动条兜。
 
 ### 11.4 验证
 
-`.workbuddy/tools/fs-test.js`，**104 条**：
+`.workbuddy/tools/fs-test.js`，修订后 **155 条**：
 
 | 段 | 覆盖 |
 |----|------|
 | A 静态源码断言（34 条） | 入口 / 抽屉 / 三层探测 / 忽略清单 / `numeric` 排序 / 严格 UTF-8 判据 / **「代码里不得出现任何写盘 API」**（`createWritable`、`removeEntry`、`requestPermission`… 逐条断言不存在） |
 | B jsdom 端到端（43 条） | 把 `showDirectoryPicker` 打桩成内存假文件系统，走真实点击路径：建树 → 懒加载（用「未展开目录的枚举次数为 0」证明）→ 展开 / 收起 → 非文本灰显 → 切文档且预览跟随 → BOM / GBK 解码 |
-| C 真实 Edge（27 条） | 抽屉锚位（落在顶栏下方、不溢出视口、默认 264px）、毛玻璃生效、缩进随层级递增、**同级目录与文件的图标 / 文字对齐**、真实浏览器里点文件确实换正文、顶栏主操作完整可见 |
+| C 真实 Edge（78 条） | 抽屉锚位（落在顶栏下方、不溢出视口、默认 264px）、毛玻璃生效、缩进随层级递增、**同级目录与文件的图标 / 文字对齐**、真实浏览器里点文件确实换正文、**顶栏按钮全在可视区内且互不重叠**、抽屉的开关 / 把手 / 全部展开收起、**全屏时设备档隐藏且正文仍按当前档渲染**、打开文件不弹 Toast |
 
-连同既有四套（`fm-unit` 95 + `fm-e2e` 87 + `bq-test` 58 + `ex-test` 225），**合计 569 条断言，0 失败**。C 段顺带产出一张 `shots/fs-tree.png` 供人工核观感（脚本会打桩一个假文件系统，所以图上的树是构造出来的样本，不是真实磁盘）。
+连同既有四套（`fm-unit` 95 + `fm-e2e` 87 + `bq-test` 58 + `ex-test` 225），**合计 620 条断言，0 失败**。C 段顺带产出一张 `shots/fs-tree.png` 供人工核观感（脚本会打桩一个假文件系统，所以图上的树是构造出来的样本，不是真实磁盘）。
+
+### 11.5 修订记录（2026-10-14）
+
+第一版把「文件夹」直接摆在顶栏上，结果是顶栏净增一个按钮、挤掉「外链转脚注」。这一轮做了五处调整，**都是用户当轮明确提出的**：
+
+| # | 用户要求 | 落地 |
+|---|---------|------|
+| 1 | 「把文件夹和打开收进下拉，并改为『文件、文件夹』」 | 新增「打开」下拉（`#openWrap`），内含「文件」「文件夹」两项，复用 `.export-*` 骨架；能力不足时只剩「文件」一项并收掉箭头 |
+| 2 | 「打开文件时不需要 toast 提示」 | 单文件打开与树里切换文档都不弹。**唯一例外**是编码：非 UTF-8（GBK 回退）/ UTF-16 只读预览时必须提示 |
+| 3 | 「全屏预览时隐藏掉设备列表，全屏时默认按当前选择的设备」 | `enterFullscreen()` 隐藏 `#previewModeGroup`；页宽组只在 PC 档出现（iPad / APP 的版心由 `--dev-max` 决定，inline `max-width` 会压掉它），非 PC 档进入时清掉遗留的 inline `max-width` 与 `page-mode`。`.device-*` class 全程不摘，所以「按当前档渲染」不需要额外代码 |
+| 4 | 「左侧文件树面板增加隐藏和显示控制」 | 三条路：菜单项开关（带 `.active`）、标题栏 `×`、**收起后左缘把手 `#treePeek`**（只在「有工作区 + 已收起」时出现） |
+| 5 | 「文件树增加收起和展开」 | 标题栏「全部展开 / 全部收起」。收起 = 清空展开集合（不必重读盘）；展开 = 逐个读盘，`TREE_EXPAND_MAX = 400` 封顶并在到顶时如实告知，每 20 个重绘一次 |
+
+**顺带定死的一件事**：切换文档后仍调用 `saveContent()`（写 `mdtu-content`，刷新停在这篇）——用户确认沿用，F5-b 再换成工作区存档。
+
+**另有一项方案被简化掉**：`move()` 那条「近似原子写入」路线废弃（§3.8）——它不是标准，MDN 页面已撤下；而 `createWritable()` 本身就是「先写临时文件、`close()` 时替换目标」，F5-b 少写一个 `.tmp` 回合。

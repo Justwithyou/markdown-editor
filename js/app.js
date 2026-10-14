@@ -1486,8 +1486,36 @@ img { max-width: 100%; }`;
     if (e.key === 'Escape') setExportMenu(false);
   });
 
+  // ===== 「打开」下拉（文件 / 文件夹）=====
+  // 与导出下拉共用 .export-wrap / .export-menu 一套骨架与样式，只是菜单里换成两个入口。
+  const openWrap = $('#openWrap');
+  const openMenu = $('#openMenu');
+  const btnOpen = $('#btnOpen');
+
+  function setOpenMenu(open) {
+    openMenu.classList.toggle('show', open);
+    openWrap.classList.toggle('open', open);
+    btnOpen.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  btnOpen.addEventListener('click', (e) => {
+    e.stopPropagation(); // 否则会立刻被下面的「点外部关闭」收掉
+    setOpenMenu(!openMenu.classList.contains('show'));
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!openWrap.contains(e.target)) setOpenMenu(false);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') setOpenMenu(false);
+  });
+
   // Open local file
-  $('#btnOpenFile').addEventListener('click', () => $('#fileInput').click());
+  $('#btnOpenFile').addEventListener('click', () => {
+    setOpenMenu(false);
+    $('#fileInput').click();
+  });
   $('#fileInput').addEventListener('change', (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
@@ -1501,7 +1529,7 @@ img { max-width: 100%; }`;
       renderMarkdown();
       saveContent();
       editor.scrollTop = 0;
-      showToast(`已打开：${file.name}`);
+      // 打开成功不弹提示 —— 正文已经换掉了，再盖一层浮层只是碍事
     };
     reader.onerror = () => showToast('文件读取失败');
     reader.readAsText(file, 'utf-8');
@@ -1585,14 +1613,27 @@ img { max-width: 100%; }`;
   });
 
   // Fullscreen
+  // 全屏是「安静读」的场景，进全屏等于锁定当前档位：
+  //   1) 设备档整组藏起来（不让人在全屏里来回切），正文仍按进入时那一档的版心渲染
+  //      —— `.device-*` class 一直挂在 #preview 上，什么都不用做就是对的；
+  //   2) 页宽组只对 PC 档有意义。iPad / APP 的版心是设备尺寸，再叠一层「页宽」
+  //      只会互相打架（页宽是 inline max-width，会直接压掉 --dev-max），所以非 PC 档不给。
   function enterFullscreen() {
     const panel = $('#previewPanel');
     panel.classList.add('fullscreen');
     $('#btnFullscreen').style.display = 'none';
     $('#btnPreviewScroll').style.display = 'none';
     $('#btnExitFs').style.display = '';
-    $('#fsWidthGroup').style.display = '';
-    applyFsWidth(fsWidth);
+    $('#previewModeGroup').style.display = 'none';
+    const isPc = state.device === 'pc';
+    $('#fsWidthGroup').style.display = isPc ? '' : 'none';
+    if (isPc) {
+      applyFsWidth(fsWidth);
+    } else {
+      // 把版心交还给设备档（--dev-max），别让上一次的页宽留在这里
+      preview.style.maxWidth = '';
+      preview.classList.remove('page-mode');
+    }
   }
   function exitFullscreen() {
     const panel = $('#previewPanel');
@@ -1600,6 +1641,7 @@ img { max-width: 100%; }`;
     $('#btnFullscreen').style.display = '';
     $('#btnPreviewScroll').style.display = '';
     $('#btnExitFs').style.display = 'none';
+    $('#previewModeGroup').style.display = '';
     $('#fsWidthGroup').style.display = 'none';
     preview.style.maxWidth = '';
     preview.classList.remove('page-mode');
@@ -2201,6 +2243,7 @@ img { max-width: 100%; }`;
   const btnOpenFolder = $('#btnOpenFolder');
   const folderInput = $('#folderInput');
   const treeResizer = $('#treeResizer');
+  const treePeek = $('#treePeek');
 
   // 树节点 = { name, kind:'dir'|'file', path, ref, children, loaded, loading, error }
   // ref 在完整模式下是 FileSystemHandle，在只读快照模式下是 File 对象。
@@ -2397,7 +2440,61 @@ img { max-width: 100%; }`;
     treeState.visible = show;
     treePanel.classList.toggle('show', show);
     if (btnOpenFolder) btnOpenFolder.classList.toggle('active', show);
+    // 把手只在「已经打开过工作区 + 抽屉处于收起」时露出来；
+    // 还没选过文件夹时不占地方（那会儿入口就在顶栏菜单里，不需要第二个）
+    if (treePeek) treePeek.hidden = !(!show && treeState.root);
     if (show) renderTree();
+  }
+
+  // 「全部收起」= 把展开集合清空。树本身（children）留着，重新展开不用再读盘。
+  function collapseAll() {
+    treeState.expanded.clear();
+    renderTree();
+  }
+
+  // 「全部展开」= 递归把每个目录都读出来再摊开。
+  // 懒加载的树一旦全展开，等于把整棵目录树读进内存 —— 几千文件的目录会直接把 UI 拖死，
+  // 所以设一个目录数上限，到顶就停手并如实告知，而不是假装已经展完。
+  const TREE_EXPAND_MAX = 400;
+
+  let treeExpanding = false;
+
+  async function expandAll() {
+    if (!treeState.root || treeExpanding) return;
+    treeExpanding = true;
+    let count = 0;
+    let hitMax = false;
+
+    async function walk(node) {
+      if (hitMax || !node.children) return;
+      for (let i = 0; i < node.children.length; i++) {
+        const c = node.children[i];
+        if (c.kind !== 'dir') continue;
+        if (count >= TREE_EXPAND_MAX) { hitMax = true; return; }
+        treeState.expanded.add(c.path);
+        // 只读快照模式的树是一次性建好的（loaded=true），这里只需展开，不读盘
+        if (!c.loaded && c.ref) {
+          count++;
+          try {
+            c.children = await listChildren(c.ref, c.path);
+            c.loaded = true;
+            c.error = '';
+          } catch (err) {
+            c.error = (err && err.message) || String(err);
+            c.children = null;
+            continue;
+          }
+          // 每读一小批重绘一次，让用户看得见进度（每读一个都重绘会把整棵遍历拖慢一个量级）
+          if (count % 20 === 0) renderTree();
+        }
+        await walk(c);
+      }
+    }
+
+    await walk(treeState.root);
+    treeExpanding = false;
+    renderTree();
+    if (hitMax) showToast('目录较多，只展开了前 ' + TREE_EXPAND_MAX + ' 个');
   }
 
   async function toggleDir(node) {
@@ -2478,9 +2575,12 @@ img { max-width: 100%; }`;
       editor.scrollTop = 0;
       previewWrap.scrollTop = 0;
       renderTree();
-      const note = dec.encoding === 'non-utf8' ? '（非 UTF-8，已按 GBK 只读预览）'
-        : (dec.encoding.indexOf('utf-16') === 0 ? '（' + dec.encoding.toUpperCase() + '，仅只读预览）' : '');
-      showToast('已打开：' + node.path + note);
+      const enc = dec.encoding;
+      // 打开成功不弹提示（正文已经换掉，浮层只会碍事）；
+      // 但编码例外必须说 —— 非 UTF-8 / UTF-16 时正文是被兜底解码出来的，
+      // 用户有权知道眼前这份内容不是原文件字节的忠实还原，而且是只读的。
+      if (enc === 'non-utf8') showToast('非 UTF-8 文件，已按 GBK 只读预览', 'error');
+      else if (enc.indexOf('utf-16') === 0) showToast(enc.toUpperCase() + ' 文件，仅只读预览', 'error');
     } catch (err) {
       showToast('打开失败：' + ((err && err.message) || err), 'error');
     }
@@ -2586,16 +2686,26 @@ img { max-width: 100%; }`;
   // 能力不够时把入口与抽屉整块摘掉，而不是渲染出来再报错
   function initFolderMode() {
     if (FOLDER_CAP === 'none') {
-      [btnOpenFolder, folderInput, treePanel].forEach(function (el) {
+      [btnOpenFolder, folderInput, treePanel, treePeek].forEach(function (el) {
         if (el && el.parentNode) el.parentNode.removeChild(el);
       });
+      // 菜单里只剩「文件」一项了 —— 收掉箭头，别看着像个空下拉
+      openWrap.classList.add('single');
       return;
     }
     btnOpenFolder.hidden = false;
     treeModeEl.textContent = FOLDER_CAP === 'snapshot' ? '只读' : '';
 
-    btnOpenFolder.addEventListener('click', function () { setTreePanel(!treeState.visible); });
+    // 抽屉的显示 / 隐藏有两条路：顶栏菜单里那一项是开关（展开时带激活态），
+    // 抽屉自己的「收起」与左缘把手都能把它收掉 / 拉回来 —— 后者是收起后唯一一眼可见的入口。
+    btnOpenFolder.addEventListener('click', function () {
+      setOpenMenu(false);
+      setTreePanel(!treeState.visible);
+    });
     $('#treeClose').addEventListener('click', function () { setTreePanel(false); });
+    $('#treeExpandAll').addEventListener('click', function () { expandAll(); });
+    $('#treeCollapseAll').addEventListener('click', function () { collapseAll(); });
+    if (treePeek) treePeek.addEventListener('click', function () { setTreePanel(true); });
     folderInput.addEventListener('change', onFolderInputChange);
     renderTree();
   }

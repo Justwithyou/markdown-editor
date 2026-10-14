@@ -52,12 +52,12 @@
 
 ```
 mdtu-editor/
-├── index.html        # 页面结构 + CDN 依赖引入 + 图标声明（451 行）
+├── index.html        # 页面结构 + CDN 依赖引入 + 图标声明（478 行）
 ├── Markdown.ico      # 站点图标，六帧（16/32/48/64/128/256）；页头 / 标签页 / 桌面快捷方式共用
 ├── css/
-│   └── style.css     # 全部样式：2 套主题 + 布局 + 弹窗 + 水印 + 元数据 + 设备档预览 + 文件树抽屉 + 导出下拉 + 打印（1604 行）
+│   └── style.css     # 全部样式：2 套主题 + 布局 + 弹窗 + 水印 + 元数据 + 设备档预览 + 文件树抽屉 + 打开与导出下拉 + 打印（1661 行）
 ├── js/
-│   └── app.js        # 全部逻辑：解析/渲染/大纲/水印/模板/元数据/复制/导出/设备档预览/文件夹模式（2629 行）
+│   └── app.js        # 全部逻辑：解析/渲染/大纲/水印/模板/元数据/复制/导出/设备档预览/文件夹模式（2739 行）
 ├── README.md         # 项目说明（GitHub 标准格式）
 ├── ROADMAP.md        # 未来功能升级路线（独立文档）
 ├── DESIGN.md         # 本文档
@@ -146,9 +146,11 @@ preview.innerHTML = html  ← 写入预览区
 |------|------|
 | 左侧 `.header-left` | Logo：`📝 Markdown-Editor` |
 | 中间 `.header-center` | 主题切换（**2026-10-13 起放开供评估**）、大纲、自动编号、插入目录、方格背景、使用模板、水印 |
-| 右侧 `.header-right` | **文件夹（F5 入口）**、打开文件、更多工具、外链转脚注、**导出（下拉菜单）**、**复制（primary 主按钮）** |
+| 右侧 `.header-right` | **打开（下拉菜单：文件 / 文件夹）**、更多工具、外链转脚注、**导出（下拉菜单）**、**复制（primary 主按钮）** |
 
-**装不下时怎么办。** 顶栏在 1280px 宽度下本来就装不下（F5 之前 `#btnExport` / `#btnCopy` 已落到可视区外），再加一个「文件夹」入口只会更挤。现在的规则是：**中间那组退化成可横向滚动的条，右侧主操作（文件夹 / 打开 / 导出 / 复制）永不缺席**——`.header-left` / `.header-right` 都是 `flex-shrink: 0`，`.header-center` 加 `min-width: 0; overflow-x: auto; justify-content: safe center`（`safe` 必不可少：居中溢出会把左端裁掉且滚不回去）。这与编辑工具栏 `.editor-toolbar` 的既有做法一致。
+**装不下时怎么办。** 顶栏在 1280px 宽度下本来就装不下（F5 之前 `#btnExport` / `#btnCopy` 已落到可视区外）。现在的规则是：**中间那组退化成可横向滚动的条，右侧主操作（打开 / 导出 / 复制）永不缺席**——`.header-left` / `.header-right` 都是 `flex-shrink: 0`，`.header-center` 加 `min-width: 0; overflow-x: auto; justify-content: safe center`（`safe` 必不可少：居中溢出会把左端裁掉且滚不回去）。这与编辑工具栏 `.editor-toolbar` 的既有做法一致。
+
+**两个入口收进下拉，而不是各占一个按钮。** F5-a 落地的第一版把「文件夹」直接摆在顶栏上，于是顶栏净增一个按钮、挤掉「外链转脚注」。改为：**「打开」按钮 + 菜单里的「文件」「文件夹」两项**，与「导出」下拉共用同一套骨架（`.export-wrap` / `.export-menu` / `.export-item`），样式表只补 `#openWrap.single .export-caret`（不支持文件夹 API 时菜单只剩一项，收掉箭头）。
 
 ### 5.2 主区双栏（`.app-main`）
 
@@ -167,7 +169,7 @@ preview.innerHTML = html  ← 写入预览区
 ```
 
 - **编辑面板**：编辑工具栏（18 个语法插入按钮 + URL 采集 + 清空）→ textarea 编辑器 → 状态栏（字符/词/行统计）。
-- **预览面板**：预览工具栏（**设备档一组平铺档位按钮**、元数据档位、同步滚动、全屏、全屏页宽控件）→ `.preview-scroll`（带动画的滚动容器）→ `.preview-wrap`（真正的滚动容器）→ `.markdown-body`（渲染正文）。
+- **预览面板**：预览工具栏（**设备档一组平铺档位按钮**、元数据档位、同步滚动、全屏、全屏页宽控件）→ `.preview-scroll`（带动画的滚动容器）→ `.preview-wrap`（真正的滚动容器）→ `.markdown-body`（渲染正文）。全屏时**设备档整组与「退出全屏」之外的控件一起被 JS 收起**（见 7.9）。
 - **分隔条 `.resizer`**：可拖拽调整两栏比例（`mousedown/mousemove/mouseup`，15%–85% 范围限制）。
 
 ### 5.3 弹窗组件
@@ -179,7 +181,7 @@ preview.innerHTML = html  ← 写入预览区
 | `#linksModal` | 760px (modal-lg) | 工具/开源项目导航（三 Tab） |
 | `#watermarkModal` | 680px (modal-md) | 水印设置（左表单 + 右预览） |
 
-另有悬浮组件：文档大纲 `.outline-panel`（右侧垂直居中悬浮）、**文件树抽屉 `.file-tree-panel`**（左侧，F5，见 7.10）、Toast 提示 `.toast`。
+另有悬浮组件：文档大纲 `.outline-panel`（右侧垂直居中悬浮）、**文件树抽屉 `.file-tree-panel`**（左侧，F5，见 7.10）、**抽屉把手 `.tree-peek`**（抽屉收起后贴左缘的一小条，只在「有工作区 + 抽屉收起」时出现；`position: fixed`，避开 `.app-main` 的 flex）、Toast 提示 `.toast`。
 
 ---
 
@@ -208,12 +210,13 @@ preview.innerHTML = html  ← 写入预览区
 | 功能 | 说明 |
 |------|------|
 | 文档大纲 | 扫描 H1–H6，点击左（源码）右（预览）双栏联动跳转 |
-| 全屏预览 | 预览区全屏 + Esc 退出 |
-| 页宽调节 | 窄 680 / 中 880 / 宽 1100 / 超宽 1400 / 全屏宽（纸张感） |
+| 全屏预览 | 预览区全屏 + Esc 退出；进全屏即**锁定当前设备档**（设备档整组隐藏），iPad / APP 档不给页宽 |
+| 页宽调节 | 窄 680 / 中 880 / 宽 1100 / 超宽 1400 / 全屏宽（纸张感）；**仅 PC 档可用** |
 | 自动编号 | H1–H3 多级编号 |
 | 插入目录 | 自动生成 TOC |
 | 方格背景 | 便于截图对齐 |
-| 打开文件 | 读本地 `.md/.markdown/.txt/.mdx` |
+| 打开文件 | 「打开」下拉里的**「文件」**：读本地 `.md/.markdown/.txt/.mdx` |
+| 打开文件夹 | 「打开」下拉里的**「文件夹」**：F5-a 只读文件树（见 7.10） |
 | 文档元数据 | 识别首部 YAML Front Matter，渲染为顶部「属性」面板（类型图标 + 标签 / 布尔 / 日期类型化，三档展示，见 7.7） |
 | URL 采集 | 输入网址抓正文转 Markdown |
 | 更多工具 | 内置同类工具与开源项目导航（三 Tab） |
@@ -248,7 +251,7 @@ preview.innerHTML = html  ← 写入预览区
 
 克隆预览 → **摘掉 `[data-fm-ui]` 元数据标题行** → 清空背景 → 注入 `getThemeStyles(theme)` 的 `<style>` 块 → 注入 DOM 水印 → `Range` 选区 + `execCommand('copy')`，失败则降级为纯文本复制。用废弃但兼容性最好的 `execCommand` 实现富文本复制。
 
-### 7.5 大纲双向联动（app.js:1620–1883）
+### 7.5 大纲双向联动（app.js:1662–1925）
 
 - `getSourceHeadings()`：扫描源码 ATX 标题（跳过围栏代码块）记录行号。
 - `buildOutline()`：把预览区 `<h1..h6>` 通过「层级 + 归一化文本」匹配回源码行号。
@@ -287,7 +290,7 @@ preview.innerHTML = html  ← 写入预览区
 
 ### 7.8 导出能力（`// ===== Export (F1) =====`，app.js:1041–1332）
 
-顶栏「复制」**左侧**新增**「导出」下拉**（`index.html:102–132`，样式 `style.css:180–254`），把四个动作收进一个菜单，避免顶栏按钮继续横向膨胀。四个动作全部通过**浏览器下载**落盘（`Blob` + `URL.createObjectURL` + `<a download>`），不经过任何服务端；**零新增依赖**。
+顶栏「复制」**左侧**新增**「导出」下拉**（`index.html:118–146`，样式 `style.css:180–276`），把四个动作收进一个菜单，避免顶栏按钮继续横向膨胀。四个动作全部通过**浏览器下载**落盘（`Blob` + `URL.createObjectURL` + `<a download>`），不经过任何服务端；**零新增依赖**。
 
 | 动作 | `data-export` | 实现 | 产物 |
 |---|---|---|---|
@@ -313,7 +316,7 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 
 > **`data-page-node-id` 是什么？** 这份 `index.html` 一旦托管成 WorkBuddy 资料库的「页面」，页面平台就会给每个元素打上这个东西（内部叫 `pnid`），用于**节点级评论**与**「划词让 AI 改」的改动定位**（见内置 `library` 技能的 `page/edit-flow.md`）。它对运行没有任何影响，但会随 `preview.cloneNode(true)` 混进公众号与导出文件。**2026-10-13 已确认项目里零处读取它，整批清除了 312 处**；`stripEditorOnlyAttrs()`（app.js:919）留在 `copyToClipboard()`（app.js:942）与 `clonePreviewForExport()`（app.js:1106）两条克隆路径上做防御——文件若再被托管回资料库，属性会重新出现。ex-test 有一条「手动注入 pnid → 导出应剥掉」的用例锁着这段逻辑。
 
-**导出 PDF 的打印样式（`style.css:1515–1604`），六组规则：**
+**导出 PDF 的打印样式（`style.css:1571–1661`），六组规则：**
 
 1. **隐藏界面壳子**：`.app-header` / `.editor-panel` / `.resizer` / `.preview-toolbar` / `.outline-panel` / `.toast` / `.modal-overlay`
 2. **解除页面级锁定**：`html, body { height: auto; overflow: visible }`、`body { display: block }`、`.app-main { display: block; overflow: visible }`
@@ -322,7 +325,7 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 5. **`#preview { print-color-adjust: exact }`**：暗色主题按原色打印，不被浏览器「省墨」洗成白底
 6. **分页控制**：`pre` / `blockquote` / `table` / `.mermaid-rendered` / `.katex-display` / `.fm-block` 加 `break-inside: avoid`，`h1`–`h6` 加 `break-after: avoid`，`p, li` 设 `orphans: 2; widows: 2`
 
-另有 `@page { margin: 16mm }` 放在 `@media print` **之外**（`style.css:1519`）——`@page` 本身就是页面级 at-rule，放外面更直观，两条规则都有断言盯着。
+另有 `@page { margin: 16mm }` 放在 `@media print` **之外**（`style.css:1575`）——`@page` 本身就是页面级 at-rule，放外面更直观，两条规则都有断言盯着。
 
 **导出 Word 的兼容性子集（`buildWordHtml()`，app.js:1241）。** `application/msword` + `.doc` 套壳，本质仍是 HTML。Word / WPS 只认一小撮 CSS，因此：
 
@@ -339,7 +342,7 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 
 ### 7.9 预览模式：设备档
 
-同一篇稿子在 PC、平板、手机上的观感差别很大，而这个差别只有到发布那一刻才暴露。预览工具栏左侧的**一组设备档按钮**（`index.html:244–250`）把这个差别提前搬到预览里。
+同一篇稿子在 PC、平板、手机上的观感差别很大，而这个差别只有到发布那一刻才暴露。预览工具栏左侧的**一组设备档按钮**（`index.html:258–264`）把这个差别提前搬到预览里。
 
 **一、只有设备一个维度，平台规则内建在档位里。** 早期版本把「设备端」与「展示端（Web / 公众号 / 掘金）」拆成两个正交维度，后来**合并成一维**——因为每档设备其实只对应一种典型阅读场景，让用户自由组合反而会造出「PC × 公众号」这种现实中不存在的组合：
 
@@ -377,7 +380,7 @@ preview.className = [
 
 全文**只允许这一处写 `preview.className = [`**（ex-test 有断言 `eq((appSrc.match(/preview\.className = \[/g)||[]).length, 1)` 锁着）。任何一处直接整串覆盖，都会把其余几维静默冲掉——这是多维共存能被破坏的唯一方式。`applyTheme()` / `applyDevice()` 都只改 `state` 再调它，方格背景按钮也从 `classList.toggle('grid-bg', …)` 改为同一出口。
 
-**四、版心：设备视口压一道 820px 上限（`style.css:468`）。**
+**四、版心：设备视口压一道 820px 上限（`style.css:490`）。**
 
 ```css
 .markdown-body {
@@ -421,6 +424,8 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 | iPad | 768px | 696px | 17px | 1.7 | normal | 可横向滚动 |
 | APP | 375px | 343px | 17px | 1.75 | 0.5px | 折行（`white-space: pre-wrap`） |
 
+**九、全屏 = 锁定当前档位。** 全屏是「安静读」的场景，进去之后不该还能来回切档。`enterFullscreen()` 做三件事：把设备档整组（`#previewModeGroup`）`display:none`；**页宽组只在 PC 档显示**——iPad / APP 的版心由 `--dev-max` 决定，而页宽走的是 inline `max-width`，叠上去会直接压掉版心，两者互相打架，所以非 PC 档索性不给；进入前是 iPad / APP 档时，把上一次遗留的 inline `max-width` 与 `page-mode` 清掉，**把版心交还给设备档**。`.device-*` class 一直挂在 `#preview` 上、全屏期间不动，所以「按当前档位渲染」不需要额外代码。退出全屏（按钮或 `Esc`）再把这几个 `display` 还原。
+
 `applyDevice()`（app.js:903）负责落盘（`mdtu-device`）、同步按钮激活态（`syncSegBtns()`）与 `previewScroll.classList.toggle('device-frame', …)`（非 PC 档压深底衬，设备边界才看得见）；`init()` 里用 `pickSaved()` 校验存档值后套用。**切换不弹 Toast**：档位本身就写着 `PC` / `iPad` / `APP`、按钮高亮即选中态，变的是正文本身；再弹一个浮层挡住正文并停留 2.5s，是纯粹的信息噪声。工具栏上也不写「设备」二字——三个档位自明，多一个标签只是占掉横向空间。
 
 ---
@@ -446,6 +451,12 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 **编码判据（这也是 F5-b 关闭写回通道的依据，先在这里定下来）**：`decodeBytes()` 按「UTF-8 BOM → UTF-16 BOM → 严格 UTF-8（`TextDecoder('utf-8', { fatal: true })`）→ 失败即判非 UTF-8，回退 `TextDecoder('gbk')`」的顺序解码。BOM 会被剥掉，与 `FileReader.readAsText` 的既有行为一致；非 UTF-8 / UTF-16 只读预览并明确提示。
 
 **UI 复用**：抽屉刻意带上 `.outline-panel` 类——浮层骨架、`.show` 切换、**打印时隐藏**三件事都由那一套既有规则承担，`.file-tree-panel` 只把它从「右侧居中浮层」改成「左侧通栏抽屉」（毛玻璃 + 宽度拖拽，宽度记在 `mdtu-tree-width`）。文件行会占住折叠箭头那一列（空槽），否则同级目录与文件的图标 / 文字会左右错开。
+
+**抽屉的显示 / 隐藏有三条路，各司其职。** ① 顶栏「打开 → 文件夹」那一项本身就是**开关**（展开时带 `.active` 激活态）；② 抽屉标题栏的 `×` 收起它；③ **抽屉收起后，左缘留一个把手 `.tree-peek`**（`position: fixed`，贴左缘的一小条毛玻璃），点一下把它拉回来。第 ③ 条只在「**已经打开过工作区 + 抽屉处于收起**」时露出——还没选过目录时那个位置就空着（入口在顶栏菜单里，不需要第二个）。这条是为了把「隐藏之后怎么找回来」变成一个一眼可见的动作，而不是让人记得去菜单里翻。
+
+**「全部展开 / 全部收起」是两件不同的事。** 收起只是 `treeState.expanded.clear()`（清空展开集合，树的 `children` 留着，重新展开不必再读盘）。展开则要**逐个目录读盘**——懒加载的树一旦全展开，等于把整棵目录树读进内存，几千文件的目录会直接拖死 UI，所以 `TREE_EXPAND_MAX = 400` 封顶：到顶就停手并 `showToast('目录较多，只展开了前 400 个')`，而不是假装展完了。读盘过程中每 20 个目录重绘一次（每个都重绘会把整趟遍历拖慢一个量级），并用 `treeExpanding` 防止重复点击叠加。
+
+**打开成功不弹 Toast。** 正文已经换掉了，再盖一层浮层只是碍事——这条同时适用于单文件打开与树里切换文档。**只有一种例外**：非 UTF-8（GBK 回退）/ UTF-16 解码时必须提示，因为那时眼前的内容不是原文件字节的忠实还原，而且只读。
 
 ---
 

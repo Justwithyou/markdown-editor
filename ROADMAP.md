@@ -35,7 +35,7 @@
 
 > **F3 标记为「🟦 部分」的原因**：2026-10-13 已落地**主题精简**（4 套 → 2 套：GitHub / 晴空蓝），并完成**两个外部对标站点的可行性调研**（独立文档 [F3-THEME-RESEARCH.md](./F3-THEME-RESEARCH.md)）；但主题体系的架构重构（内联样式、token → CSS、代码主题独立切换）尚未开始。
 
-> **F5 标记为「🟦 部分」的原因**：2026-10-13 已落地只读的 **F5-a**（打开文件夹 + 文件树 + 切换文档 + 三层能力降级），风险最高、才算「实时编辑」的写回（F5-b）与文件管理（F5-c）、外部修改检测（F5-d）均未做。**本期全程不写盘**。
+> **F5 标记为「🟦 部分」的原因**：2026-10-13 已落地只读的 **F5-a**（打开文件夹 + 文件树 + 切换文档 + 三层能力降级，2026-10-14 修订了入口收拢与抽屉开关），风险最高、才算「实时编辑」的写回（F5-b）与文件管理（F5-c）、外部修改检测（F5-d）均未做。**本期全程不写盘**。
 
 **共同前置约束**：项目目前是「零构建 + CDN 引入」的纯静态三文件，任何新增依赖都要么走 CDN `<script>`，要么会引入构建步骤并改变「双击 `index.html` 就能跑」这一性质。引入前请先在此登记并同步更新 README。
 
@@ -94,7 +94,7 @@ await navigator.clipboard.writeText(editor.value);
 | **A（推荐先做）** | `window.print()` + 新增 `@media print` 规则 | 零依赖、矢量清晰、可选页边距/页眉页脚 | 需用户在打印对话框选「另存为 PDF」，多一步 |
 | B | html2pdf.js（html2canvas + jsPDF） | 一键直出 | 基于截图，中文 / KaTeX / Mermaid SVG 易糊或缺失；新增约 200KB CDN 依赖 |
 
-注意：`css/style.css` 当时**完全没有 `@media print` 规则**（全文 0 处），走方案 A 必须补上，否则打印结果会带上顶栏、工具栏和编辑区。落地时已补齐——`@page { margin: 16mm }` 放在 `style.css:1519`（媒体查询**之外**），`@media print { … }` 主体在 `style.css:1523` 起。
+注意：`css/style.css` 当时**完全没有 `@media print` 规则**（全文 0 处），走方案 A 必须补上，否则打印结果会带上顶栏、工具栏和编辑区。落地时已补齐——`@page { margin: 16mm }` 放在 `style.css:1575`（媒体查询**之外**），`@media print { … }` 主体在 `style.css:1579` 起。
 
 #### 4. 导出 Word — 两方案二选一
 
@@ -105,11 +105,11 @@ await navigator.clipboard.writeText(editor.value);
 
 ### 任务拆解
 
-- [x] 顶部新增「导出」下拉组件（HTML + CSS）：`#exportWrap` / `#btnExport` / `#exportMenu` + 4 个 `.export-item[data-export="md|html|pdf|word"]`，带 `role="menu"` / `aria-haspopup` / `aria-expanded`（`index.html:102–132`）
+- [x] 顶部新增「导出」下拉组件（HTML + CSS）：`#exportWrap` / `#btnExport` / `#exportMenu` + 4 个 `.export-item[data-export="md|html|pdf|word"]`，带 `role="menu"` / `aria-haspopup` / `aria-expanded`（`index.html:118–146`）
 - [x] 抽出 `buildStandaloneHtml()`（规划里叫 `exportHtml()`）：主题样式 + hljs 样式 + KaTeX 样式内联，并先做 `url()` 绝对化
 - [x] 实现复制 Markdown（含 `file://` / 非安全上下文下的 `execCommand('copy')` 降级路径）
 - [x] 实现导出 HTML：**文件名按「元数据 `title` → 首个 H1 → `document`」取**（规划只写了「取首个 H1」），非法字符清洗 + 80 字符截断
-- [x] 补充 `@media print` 样式（`style.css:1519` `@page` + `:1320` `@media print`），实现导出 PDF
+- [x] 补充 `@media print` 样式（`style.css:1575` `@page` + `:1579` `@media print`），实现导出 PDF
 - [x] 实现导出 Word（方案 A：`application/msword` + `.doc` 套壳；`WORD_COMPAT_CSS` 用 `pt` 兜底，元数据面板降级为两列表格）
 - [x] 四个动作统一接入 Toast 成功/失败反馈
 
@@ -173,7 +173,7 @@ cd .workbuddy/tools && npm i && node ex-test.js
 2. **块级公式不渲染**（即上文那条既有回归）。
 3. **`--print-to-pdf` 拿到 0 字节但退出码为 0**——Windows 上 Edge 是**启动器进程**，命令行进程立刻退出，PDF 由真正的浏览器进程**异步落盘**。必须轮询「文件存在且大小连续两次不变」才能认为产物完成。
 4. **headless 下 CDN 没加载完就截图**——`--virtual-time-budget` 会把 `setTimeout` 的虚拟时钟提前推爆，探针在真实 CDN 回来之前就报了 `marked=undefined`，截图是白纸。做视觉核对时改为把 CDN 引用改指本机代理（内容仍取 jsDelivr 原文件，只是多了磁盘缓存），虚拟时钟才不再和真实网络打架；同时用页面探针回传 `editorLen` / `previewLen` / `katexNodes` 作为「确实渲染了」的证据，而不是靠猜等待时间。
-5. **`indexOf('@media print')` 命中了注释里的同名字样**（`style.css:1523` 的注释正文），导致抠出来的「打印样式」是旁边的 `@page` 块。改为用正则要求 `@media print` 后面真的跟 `{`。
+5. **`indexOf('@media print')` 命中了注释里的同名字样**（`style.css:1579` 的注释正文），导致抠出来的「打印样式」是旁边的 `@page` 块。改为用正则要求 `@media print` 后面真的跟 `{`。
 
 ---
 
@@ -183,11 +183,11 @@ cd .workbuddy/tools && npm i && node ex-test.js
 
 | 问题 | 代码依据 |
 |------|----------|
-| ~~无打印样式~~ | **F1 已补齐**：`css/style.css:1519` `@page` + `:1320` `@media print` |
+| ~~无打印样式~~ | **F1 已补齐**：`css/style.css:1575` `@page` + `:1579` `@media print` |
 | 无障碍属性覆盖极少 | 仅 F1 新增的「导出」下拉带了 `role="menu"` / `aria-haspopup` / `aria-expanded`（`app.js:1466` 同步 `aria-expanded`）；其余按钮与弹窗仍无 `aria-label` / `role="dialog"` |
 | 字体栈缺兜底 | 编辑器使用 `JetBrains Mono / Fira Code / SF Mono / Cascadia Code`，多数机器未安装，实际回退到系统默认，观感不一致 |
 | 提示无分级 | `showToast(msg, type)` 支持 `success` / `error`，但调用处几乎只用 success；失败路径（如 URL 采集失败）反馈不足 |
-| 危险操作确认覆盖不全 | 仅「打开文件」「清空内容」有 `confirm()`（app.js:1496 / 1513），删除模板等无确认 |
+| 危险操作确认覆盖不全 | 仅「打开文件」「清空内容」有 `confirm()`（app.js:1524 / 1513），删除模板等无确认 |
 | Esc 关闭弹窗未统一 | 仅「水印」弹窗实现；模板 / URL / 更多工具三个弹窗缺失 |
 | 无查找替换 | — |
 | 无图片粘贴/拖拽上传 | 仅支持手写图片链接语法 |
@@ -577,7 +577,7 @@ splitFrontMatter(源码) → marked.parse(body) → 前置元数据面板
 
 ## F5 · 文件夹模式（打开整个文件夹并写回磁盘）
 
-> **状态：🟦 F5-a 已实现**（2026-10-13 落地，分支 `feature-folder`）；F5-b / F5-c / F5-d 待做。完整技术方案、交互设计、数据模型与边界清单见 **[F5-FOLDER-MODE.md](./F5-FOLDER-MODE.md)**；本节只记录登记信息与关键结论，避免两处各写一份。落地时新增回归套件 `fs-test.js`（104 条断言）。
+> **状态：🟦 F5-a 已实现**（2026-10-13 落地、2026-10-14 修订，分支 `feature-folder`）；F5-b / F5-c / F5-d 待做。完整技术方案、交互设计、数据模型与边界清单见 **[F5-FOLDER-MODE.md](./F5-FOLDER-MODE.md)**；本节只记录登记信息与关键结论，避免两处各写一份。落地时新增回归套件 `fs-test.js`（修订后 155 条断言）。
 
 ### 背景
 
@@ -589,11 +589,11 @@ splitFrontMatter(源码) → marked.parse(body) → 前置元数据面板
 
 | # | 假设点 | 代码位置 | 现状 |
 |---|--------|----------|------|
-| 1 | 正文只有一份 | `saveContent()` / `loadContent()`（app.js:1994 / 1998） | 固定读写 `localStorage['mdtu-content']` 这一个键 |
+| 1 | 正文只有一份 | `saveContent()` / `loadContent()`（app.js:2036 / 2040） | 固定读写 `localStorage['mdtu-content']` 这一个键 |
 | 2 | 输入即全量落库 | `editor.addEventListener('input')` → `saveContent()`（app.js:1383） | 没有「当前文档」概念，也没有脏标记 |
-| 3 | `Ctrl+S` 只写 localStorage | app.js:1871 | 项目至今**没有任何写回磁盘的能力** |
-| 4 | 打开文件即覆盖 | app.js:1491–1509 | 读入后直接赋给 `editor.value`；`file.name` 只在 Toast 里出现一次，不保存 |
-| 5 | 编码固定 UTF-8 | `reader.readAsText(file, 'utf-8')`（app.js:1507） | 单文档模式下 GBK 文件已经会乱码 |
+| 3 | `Ctrl+S` 只写 localStorage | app.js:1913 | 项目至今**没有任何写回磁盘的能力** |
+| 4 | 打开文件即覆盖 | app.js:1515–1537 | 读入后直接赋给 `editor.value`；`file.name` 只在 Toast 里出现一次，不保存 |
+| 5 | 编码固定 UTF-8 | `reader.readAsText(file, 'utf-8')`（app.js:1535） | 单文档模式下 GBK 文件已经会乱码 |
 
 反过来，**渲染层完全不必改**：`renderMarkdown()`（app.js:547）是 `editor.value` 的**纯函数**，不关心「当前是哪个文件」。切换文档本质上就是「换 `editor.value` → 调一次 `renderMarkdown()`」。这是本项最大的有利条件——全部文章主题、Front Matter 面板、水印、外链转脚注、大纲零改动。
 
@@ -648,9 +648,14 @@ F5 **不越界**：纯本地、不碰后端，与「非目标」中的「云同�
 
 - [x] **前置验证**：真浏览器手动点一次 `showDirectoryPicker()`，确认 `file://` 下能弹出目录选择器（2026-10-13 确认可用）
 - [x] **F5-a** 能力探测与降级：不支持时保持现有单文档模式，UI 不露出入口
-- [x] **F5-a** 文件树 UI（落点复用现有浮层，`#outlinePanel` 见 app.js:1621 / 1766）
+- [x] **F5-a** 文件树 UI（落点复用现有浮层，`#outlinePanel` 见 app.js:1663 / 1808）
 - [x] **F5-a** 目录递归枚举：忽略 `node_modules` / `.git` / `dist`，子目录懒加载
 - [x] **F5-a** 文档切换：换 `editor.value` → `renderMarkdown()`
+- [x] **F5-a 修订**「文件 / 文件夹」收进顶栏「打开」下拉（不再各占一个按钮），避免顶栏继续横向膨胀
+- [x] **F5-a 修订** 文件树抽屉的显示 / 隐藏：菜单项开关 + 标题栏 `×` + **收起后左缘把手**
+- [x] **F5-a 修订** 树本身的「全部展开 / 全部收起」（展开逐个读盘，`TREE_EXPAND_MAX = 400` 封顶）
+- [x] **F5-a 修订** 打开文件 / 切换文档成功**不弹 Toast**（编码例外：非 UTF-8 / UTF-16 只读预览时必须提示）
+- [x] **F5-a 修订** 全屏预览**锁定当前设备档**（设备档整组隐藏；页宽仅在 PC 档出现）
 - [ ] **F5-b** 拆出「按文档存取」的持久化层，替代固定的 `mdtu-content`
 - [ ] **F5-b** `Ctrl+S` 写回磁盘 + 脏标记 + 首次接管某文件时先写 `.bak`
 - [ ] **F5-b** 换行符（CRLF / LF）原样保留 + 编码嗅探的**写回侧**（读侧判据已在 F5-a 落地：非 UTF-8 一律关闭写回通道）
@@ -690,11 +695,25 @@ F5 **不越界**：纯本地、不碰后端，与「非目标」中的「云同�
 
 **仍需人工确认的一项**：README「方式二：直接双击打开」下、**真实文件系统**里的目录选择器弹出——headless 造不出真实点击手势，本期的 C 段用打桩的假文件系统验证了逻辑与几何，但「`file://` 下真能弹出来」这一步是用户于 2026-10-13 手动确认的（见 §9.4）。
 
+### 落地记录（F5-a 修订，2026-10-14）
+
+第一版 F5-a 把「文件夹」直接摆在顶栏上，于是顶栏净增一个按钮、把「外链转脚注」挤了出去。这一轮做了五处调整：
+
+| # | 调整 | 做法 |
+|---|------|------|
+| 1 | **「文件 / 文件夹」收进「打开」下拉** | 与「导出」下拉共用 `.export-wrap` / `.export-menu` / `.export-item` 骨架，只补 `#openWrap.single .export-caret`（不支持文件夹 API 时菜单只剩一项，收掉箭头）。顶栏按钮数回到 F5 之前的水平 |
+| 2 | **打开成功不弹 Toast** | 单文件打开与树里切换文档都不弹——正文已经换掉了，浮层只是碍事。**唯一例外**是编码：非 UTF-8（GBK 回退）/ UTF-16 只读预览时必须提示，因为那不是原文件字节的忠实还原 |
+| 3 | **抽屉的显示 / 隐藏** | 三条路：菜单项开关（带 `.active` 激活态）、标题栏 `×`、**收起后左缘的把手 `.tree-peek`**（`position: fixed`，只在「有工作区 + 已收起」时出现） |
+| 4 | **树的「全部展开 / 全部收起」** | 收起 = 清空展开集合（`children` 留着，不必重读盘）；展开 = 逐个目录读盘，`TREE_EXPAND_MAX = 400` 封顶，到顶提示「只展开了前 400 个」，每 20 个重绘一次 |
+| 5 | **全屏锁定当前设备档** | `enterFullscreen()` 把 `#previewModeGroup` 整组隐藏，页宽组只在 PC 档显示（iPad / APP 的版心是 `--dev-max`，inline `max-width` 会压掉它），非 PC 档进入时清掉遗留的 inline `max-width` 与 `page-mode` |
+
+**验证（修订后）**：`fs-test.js` 扩到 **155 条**（静态 34 / jsdom 43 / 真实 Edge 78），连同既有四套（95 + 87 + 58 + 225），**合计 620 条断言全绿**。新增覆盖：顶栏按钮全部在可视区内且互不重叠、菜单只一项时收箭头、抽屉的开关 / 把手 / 全部展开收起、全屏时设备档隐藏且正文仍按当前档渲染、打开文件不弹 Toast。
+
 ---
 
 ## F6 · 预览模式（设备档）
 
-> **状态：✅ 已实现**（2026-10-13）。落地文件：`index.html`（预览工具栏的 `#deviceGroup` 一组平铺档位按钮，`index.html:244–250`）、`css/style.css`（`/* ===== Preview Mode: 设备端 =====` 段，style.css:499 起；按钮组样式在 `.seg-btn` / `.seg-group` 处）、`js/app.js`（`// ===== Preview Mode: 设备端 =====` 段，app.js:872 起）。**零新增依赖**（档位就是原生 `<button>`，没有引入任何 UI 库）。
+> **状态：✅ 已实现**（2026-10-13）。落地文件：`index.html`（预览工具栏的 `#deviceGroup` 一组平铺档位按钮，`index.html:258–264`）、`css/style.css`（`/* ===== Preview Mode: 设备端 =====` 段，style.css:521 起；按钮组样式在 `.seg-btn` / `.seg-group` 处）、`js/app.js`（`// ===== Preview Mode: 设备端 =====` 段，app.js:872 起）。**零新增依赖**（档位就是原生 `<button>`，没有引入任何 UI 库）。
 >
 > 落地后的设计说明已并入 [DESIGN §7.9 预览模式](./DESIGN.md)；本章保留规划背景、交互取舍与实测记录。
 
