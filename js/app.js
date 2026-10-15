@@ -953,7 +953,7 @@ $$
     // Get computed styles from the theme
     const themeStyles = getThemeStyles(state.theme);
     const styleEl = document.createElement('style');
-    styleEl.textContent = themeStyles;
+    styleEl.textContent = themeStyles + '\n' + MERMAID_LOCK_CSS;
     wrapper.insertBefore(styleEl, wrapper.firstChild);
 
     // Try to copy as rich text
@@ -1071,6 +1071,17 @@ code { font-family: Consolas, "Courier New", monospace; }
 blockquote { margin: 0 0 8pt; padding: 4pt 10pt; }
 ul, ol { margin: 0 0 8pt; padding-left: 22pt; }
 img { max-width: 100%; }`;
+
+  // Mermaid 图内排版度量回钉（与 css/style.css 同名规则平行维护）。
+  // 起因：mermaid 用**字体原生的 normal 行高**（拉丁 ≈19px/行、中文 ≈24px/行 @16px）算好节点框，
+  // 再把文字塞进同样大小的 foreignObject，**超出即被裁**；而主题样式里
+  // `body, div { font-family: …; line-height: … }` 会命中 foreignObject 里的标签 div 把字撑大。
+  // ⚠️ 钉固定倍数（如 1.5）同样错：拉丁文每行 24 > 框 19，两行裁 10px（中文恰好相等，看不出）。
+  // 产物里不带 style.css，所以这条必须跟着每个产物走。取值 = mermaid 的量算条件
+  // （16px / 字体原生 normal 行高 / 无字距）；改了 mermaid.initialize 的 fontFamily、fontSize 要同步。
+  const MERMAID_LOCK_CSS = '.mermaid-rendered svg * { ' +
+    'font-family: "trebuchet ms", verdana, arial, sans-serif; font-size: 16px; ' +
+    'line-height: normal; letter-spacing: normal; margin: 0; }';
 
   // 文档标题：正文里第一个 H1 → 元数据的 title → 空
   function docTitleText() {
@@ -1190,6 +1201,7 @@ img { max-width: 100%; }`;
       exportFrontMatterComment() +
       '<style>\n' + EXPORT_PAGE_CSS + '\n</style>\n' +
       '<style>\n' + getThemeStyles(state.theme) + '\n</style>\n' +
+      '<style>\n' + MERMAID_LOCK_CSS + '\n</style>\n' +
       (inlined.length ? '<style>\n' + inlined.join('\n') + '\n</style>\n' : '') +
       (linkTags ? linkTags + '\n' : '') +
       '<style>\n' + exportWatermarkCss() + '\n</style>\n' +
@@ -1253,7 +1265,7 @@ img { max-width: 100%; }`;
       '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View>' +
       '<w:Zoom>100</w:Zoom><w:DoNotOptimizeForBrowser/></w:WordDocument></xml><![endif]-->\n' +
       '<style>\n@page WordSection1 { size: A4; margin: 2cm; }\ndiv.WordSection1 { page: WordSection1; }\n' +
-      getThemeStyles(state.theme) + '\n' + WORD_COMPAT_CSS + '\n</style>\n' +
+      getThemeStyles(state.theme) + '\n' + WORD_COMPAT_CSS + '\n' + MERMAID_LOCK_CSS + '\n</style>\n' +
       '</head>\n<body>\n<div class="WordSection1">\n' +
       clone.outerHTML + '\n</div>\n</body>\n</html>\n';
   }
@@ -3037,4 +3049,248 @@ img { max-width: 100%; }`;
     init();
   }
 
+})();
+
+/* ===== 滚动条悬停放大（2026-10-15）=====
+   文档长时预览区右侧会出现滚动条，但太细不好抓（双屏时鼠标很容易滑到另一块屏幕）。
+   做法：指针进到容器右缘 HOT_BAND px 内 → 给容器加 .sb-hot → CSS 把拇指由 6px 画粗到 12px；
+   指针移回内容区或离开容器立刻恢复。CSS 侧同名规则在 style.css「===== Scrollbar =====」段。
+   ⚠️ 槽宽（14px）自始至终不变，只改拇指的**画法**（透明边框 4px → 1px）→ 放大时正文不重排；
+      若改成动 width，滚动条会挤走 6px 内容宽度，整篇文字会重排。
+   ⚠️ 整段放在文件末尾的独立作用域：塞进上面那个 IIFE 会让 app.js 后续行号整体后移，
+      连带 README / DESIGN / ROADMAP / F5 里上百处行号引用都要重算，故有意放在最末。 */
+(function initScrollbarHover() {
+  const HOT_BAND = 18; // 右缘往里 18px 内（含 14px 滚动条槽）算「靠近滚动条」
+  const zones = ['previewWrap', 'editor']
+    .map((id) => document.getElementById(id))
+    .filter(Boolean);
+
+  zones.forEach((zone) => {
+    zone.addEventListener('mousemove', (e) => {
+      // 只有真的出现纵向滚动条时才放大（内容没超屏就别变粗）
+      const hot =
+        e.clientX >= zone.getBoundingClientRect().right - HOT_BAND &&
+        zone.scrollHeight > zone.clientHeight + 1;
+      if (hot !== zone.classList.contains('sb-hot')) zone.classList.toggle('sb-hot', hot);
+    });
+    // 离开容器（含拖动结束后滑走）一律恢复
+    zone.addEventListener('mouseleave', () => zone.classList.remove('sb-hot'));
+    zone.addEventListener('blur', () => zone.classList.remove('sb-hot'));
+  });
+})();
+
+/* ===== Mermaid 放大浮层（点击图表 → 全屏查看）2026-10-15 =====
+   点击预览里的任意 Mermaid 图 → 全屏浮层里查看。图是**克隆**来的现成 SVG（不重新渲染），
+   所以与预览像素级一致、矢量放大不糊；浮层挂在 <body> 下（不在 #preview 内）→ 导出 HTML /
+   复制公众号 / 导出 Word 三条产物都看不到它，零污染。
+   交互：滚轮缩放（以指针为锚点）、按住拖拽平移、双击复位、Esc / 点空白 / 右上按钮关闭。
+   初始「适应窗口」，且**最多放大到原图的 2 倍**（免得小图被拉成巨无霸）。
+   ⚠️ 三个实测坑（tool: mermaid-zoom-probe.js，详见 style.css 同名段注释）：
+     ① 图必须给明确像素尺寸，否则 flex 里会塌成 0×0；
+     ② mermaid 写在 svg 上的内联 max-width 必须清掉，否则根本放不大；
+     ③ 浮层不在 .markdown-body 内，图内度量回钉在浮层里又带了一份（style.css）。
+   ⚠️ Esc：本文件里已有 4 处 Esc 消费者（导出菜单 / 打开菜单 / 退出全屏 / 水印弹窗），
+      这里用**捕获阶段 + stopImmediatePropagation**，保证「只关浮层，不会顺手退出全屏」。
+   ⚠️ 整段追加在文件末尾（同 initScrollbarHover）：插进上面那个 IIFE 会让后续行号整体后移，
+      连带文档里上百处 app.js:NNN 引用都要重算。 */
+(function initMermaidZoom() {
+  const FIT_MAX = 2; // 初始适应窗口时，最多放大到原图 2 倍
+  const ZOOM_MIN = 0.2; // 滚轮缩放下限（相对原图尺寸）
+  const ZOOM_MAX = 4; // 滚轮缩放上限
+  const FILL_W = 0.94; // 横向铺满比例
+  const FILL_H = 0.86; // 纵向铺满比例
+
+  let box = null;
+  let stage = null;
+  let figure = null;
+  let nat = { w: 0, h: 0 }; // 原图尺寸（= SVG viewBox）
+  let scale = 1;
+  let tx = 0;
+  let ty = 0;
+  let drag = null; // { x, y, moved, id } 拖拽状态
+  let swallowClick = false; // 刚结束的这次指针交互是拖拽 → 随之补发的 click 要吞掉（否则被当成「点空白」关掉浮层）
+  let dragSinceDown = false; // 本次按下以来发生过拖拽（两次快速拖拽也会被判成 dblclick → 照样不能复位）
+  let zoomSeq = 0; // 浮层克隆体的 id 序号（避免与页面上原图撞 id）
+
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  const isOpen = () => !!box && box.classList.contains('open');
+
+  function apply() {
+    figure.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  }
+
+  // 适应窗口：按两边都装得下来算，再夹到 [ZOOM_MIN, FIT_MAX]
+  function fitScale() {
+    const w = window.innerWidth * FILL_W;
+    const h = window.innerHeight * FILL_H;
+    return clamp(Math.min(w / nat.w, h / nat.h), ZOOM_MIN, FIT_MAX);
+  }
+
+  function reset() {
+    scale = fitScale();
+    // figure 的左上角落在视口中心（left/top:50%），再退回半个自身尺寸即为居中
+    tx = (-nat.w * scale) / 2;
+    ty = (-nat.h * scale) / 2;
+    apply();
+  }
+
+  function ensureBox() {
+    if (box) return;
+    box = document.createElement('div');
+    box.className = 'mermaid-zoom';
+    box.innerHTML =
+      '<div class="mermaid-zoom-stage"><div class="mermaid-zoom-figure"></div></div>' +
+      '<button type="button" class="mermaid-zoom-close" aria-label="关闭">✕</button>' +
+      '<div class="mermaid-zoom-hint">滚轮缩放 · 按住拖动 · 双击复位 · Esc 关闭</div>';
+    // ★ 挂在 body 上（不在 #preview 里）→ 产物里不会出现浮层
+    document.body.appendChild(box);
+    stage = box.querySelector('.mermaid-zoom-stage');
+    figure = box.querySelector('.mermaid-zoom-figure');
+
+    box.querySelector('.mermaid-zoom-close').addEventListener('click', (e) => {
+      e.stopPropagation();
+      close();
+    });
+    // 点空白关闭：只要没点在图上就关（关闭按钮自己 stopPropagation）。
+    // ⚠️ 拖拽过的那一次 click 必须**吞掉**（取证：mermaid-zoom-drag.js）：拖拽后浏览器会补发一个 click，
+    //   而 click 的 target 按「**按下点与抬起点的共同祖先**」算 —— 平移时把手拖到图外再松开（很常见），
+    //   target 就落成 .mermaid-zoom-stage → 被「不是图」判据命中 → close()（= 一松手视图就没了）。
+    box.addEventListener('click', (e) => {
+      if (swallowClick) { swallowClick = false; return; }
+      if (e.target.closest && e.target.closest('.mermaid-zoom-figure')) return;
+      if (e.target.closest && e.target.closest('.mermaid-zoom-close')) return;
+      close();
+    });
+
+    // wheel 挂在浮层本体上（不只舞台）：指针落在关闭按钮上时也要吃掉滚动
+    box.addEventListener('wheel', onWheel, { passive: false });
+    stage.addEventListener('pointerdown', onDown);
+    stage.addEventListener('pointermove', onMove);
+    stage.addEventListener('pointerup', onUp);
+    stage.addEventListener('pointercancel', onUp);
+    // 双击复位：⚠️ 两次快速**拖拽**也会被浏览器判成 dblclick（两次 click 都落在舞台上）→ 得挡掉
+    stage.addEventListener('dblclick', () => { if (!dragSinceDown) reset(); });
+  }
+
+  function onWheel(e) {
+    if (!isOpen()) return;
+    e.preventDefault();
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    // 指针在图内坐标（原图像素）；缩放前后让这个点钉在原地
+    const qx = (e.clientX - cx - tx) / scale;
+    const qy = (e.clientY - cy - ty) / scale;
+    const next = clamp(scale * Math.exp(-e.deltaY * 0.0015), ZOOM_MIN, ZOOM_MAX);
+    if (next === scale) return;
+    tx += (scale - next) * qx;
+    ty += (scale - next) * qy;
+    scale = next;
+    apply();
+  }
+
+  function onDown(e) {
+    if (e.button !== 0) return;
+    swallowClick = false; // 新的指针交互开始，先复位
+    dragSinceDown = false;
+    drag = { x: e.clientX, y: e.clientY, moved: false, id: e.pointerId };
+  }
+
+  function onMove(e) {
+    if (!drag) return;
+    const dx = e.clientX - drag.x;
+    const dy = e.clientY - drag.y;
+    // 先过 3px 阈值：普通点击不进入拖拽，也就不去 setPointerCapture（见上面 click 的注释）
+    if (!drag.moved && Math.hypot(dx, dy) < 3) return;
+    if (!drag.moved) {
+      drag.moved = true;
+      swallowClick = true; // 这一次是拖拽 → 放开时补发的 click 不能当「点空白」
+      dragSinceDown = true;
+      stage.classList.add('dragging');
+      if (stage.setPointerCapture) stage.setPointerCapture(drag.id);
+    }
+    tx += dx;
+    ty += dy;
+    drag.x = e.clientX;
+    drag.y = e.clientY;
+    apply();
+  }
+
+  function onUp() {
+    drag = null;
+    if (stage) stage.classList.remove('dragging');
+  }
+
+  function open(svg) {
+    const vb = svg.viewBox && svg.viewBox.baseVal;
+    const rect = svg.getBoundingClientRect();
+    const w = Math.round((vb && vb.width) || rect.width);
+    const h = Math.round((vb && vb.height) || rect.height);
+    if (!w || !h) return;
+
+    ensureBox();
+    nat = { w, h };
+    // 克隆：⚠️ 不能简单 removeAttribute('id') —— mermaid 图内 <style> 是**按 #id 作用域**写的
+    // （`#mermaid-svg-3 .node rect {…}`），id 一去掉节点样式全丢、变成黑底。
+    // 所以把 id 连同图内所有引用（<style>、url(#id…)、aria-*）整体改名成浮层专用 id：
+    // 既保住样式作用域，又不会和页面上原图撞 id。
+    const srcId = svg.getAttribute('id');
+    const zoomId = 'mermaid-zoom-svg-' + zoomSeq++;
+    const holder = document.createElement('div');
+    holder.innerHTML = srcId ? svg.outerHTML.split(srcId).join(zoomId) : svg.outerHTML;
+    const clone = holder.firstElementChild;
+    // 坑②：mermaid 给 svg 写了内联 max-width，不清掉就放不大
+    clone.style.maxWidth = 'none';
+    // 坑①：给明确像素尺寸（同时避免 svg 自带的 width="100%" 在浮层里塌成 0）
+    clone.setAttribute('width', w);
+    clone.setAttribute('height', h);
+    clone.style.width = w + 'px';
+    clone.style.height = h + 'px';
+    figure.replaceChildren(clone);
+
+    reset();
+    box.classList.add('open');
+    // 把焦点移进浮层：既避免按键漏进背后的编辑器，也让 Enter/Space 能直接关
+    box.querySelector('.mermaid-zoom-close').focus();
+  }
+
+  function close() {
+    if (!isOpen()) return;
+    box.classList.remove('open');
+    figure.replaceChildren();
+    // 焦点随关闭按钮一起消失（display:none）→ 浏览器自动交还给 body
+  }
+
+  // 事件委托：图每次重渲染都会重建节点，绑在 #preview 上才不会失效
+  const preview = document.getElementById('preview');
+  if (preview) {
+    preview.addEventListener('click', (e) => {
+      if (isOpen()) return;
+      const holder = e.target.closest && e.target.closest('.mermaid-rendered');
+      if (!holder) return;
+      if (e.target.closest('a')) return; // 图内链接（securityLevel:loose 下可用）不抢点击
+      const svg = holder.querySelector('svg');
+      if (!svg) return; // 渲染失败时的错误提示块，没有 svg
+      e.preventDefault();
+      open(svg);
+    });
+  }
+
+  // Esc 优先级：捕获阶段拦下，避免顺带触发「退出全屏」等已有处理
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (!isOpen()) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        close();
+      }
+    },
+    true
+  );
+
+  // 尺寸变了（转屏 / 改窗口 / 进出全屏）→ 重新适应窗口
+  window.addEventListener('resize', () => {
+    if (isOpen()) reset();
+  });
 })();

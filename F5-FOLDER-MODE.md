@@ -62,11 +62,11 @@
 
 | # | 假设点 | 代码位置 | 现状 | 改造方向 |
 |---|--------|----------|------|----------|
-| 1 | 正文只有一份 | `saveContent()` / `loadContent()`（app.js:2189 / 2193） | 固定读写 `localStorage['mdtu-content']` 一个键 | 拆出「按文档 id 存取」层，与单文档模式并存 |
-| 2 | 输入即全量落库 | `editor.addEventListener('input')` → `saveContent()`（app.js:1536） | 无「当前文档」概念，无脏标记 | 引入 `currentDoc` 与 `dirty` 状态 |
-| 3 | `Ctrl+S` 只写 localStorage | app.js:2066 | 项目至今**没有任何写回磁盘的能力** | 文件夹模式下语义升级为「写磁盘」 |
-| 4 | 打开文件即覆盖 | app.js:1668–1690 | 读入后直接赋 `editor.value`；`file.name` 不外传、也不保存 | 保留为兜底入口，新增路径要记文档身份 |
-| 5 | 编码固定 UTF-8 | `reader.readAsText(file, 'utf-8')`（app.js:1688） | 单文档模式下 GBK 文件**已经会乱码** | 改为 ArrayBuffer + BOM 嗅探（见 §6.4） |
+| 1 | 正文只有一份 | `saveContent()` / `loadContent()`（app.js:2201 / 2205） | 固定读写 `localStorage['mdtu-content']` 一个键 | 拆出「按文档 id 存取」层，与单文档模式并存 |
+| 2 | 输入即全量落库 | `editor.addEventListener('input')` → `saveContent()`（app.js:1548） | 无「当前文档」概念，无脏标记 | 引入 `currentDoc` 与 `dirty` 状态 |
+| 3 | `Ctrl+S` 只写 localStorage | app.js:2078 | 项目至今**没有任何写回磁盘的能力** | 文件夹模式下语义升级为「写磁盘」 |
+| 4 | 打开文件即覆盖 | app.js:1680–1702 | 读入后直接赋 `editor.value`；`file.name` 不外传、也不保存 | 保留为兜底入口，新增路径要记文档身份 |
+| 5 | 编码固定 UTF-8 | `reader.readAsText(file, 'utf-8')`（app.js:1700） | 单文档模式下 GBK 文件**已经会乱码** | 改为 ArrayBuffer + BOM 嗅探（见 §6.4） |
 
 ### 2.2 最有利的一条：渲染层是纯函数
 
@@ -83,8 +83,8 @@ renderMarkdown();            // 其余全自动
 
 | 落点 | 位置 | 可复用之处 |
 |------|------|------------|
-| `.outline-panel`（文档大纲浮层） | app.js:1816 / 1959 | 已是「右侧浮层 + `.show` 切换」的成熟模式，文件树可照搬这套结构与样式 |
-| 顶栏右侧按钮组 | DESIGN §5.1 | 「打开文件」的既有落点在 app.js:1668；2026-10-14 起它与新增的「打开文件夹」一起收进顶栏「打开」下拉，不再各占一个按钮 |
+| `.outline-panel`（文档大纲浮层） | app.js:1828 / 1971 | 已是「右侧浮层 + `.show` 切换」的成熟模式，文件树可照搬这套结构与样式 |
+| 顶栏右侧按钮组 | DESIGN §5.1 | 「打开文件」的既有落点在 app.js:1680；2026-10-14 起它与新增的「打开文件夹」一起收进顶栏「打开」下拉，不再各占一个按钮 |
 | `.resizer` 分栏 | DESIGN §5.2 | 若文件树做左侧抽屉，宽度可复用这套拖拽逻辑 |
 
 ### 2.4 项目级约束
@@ -254,11 +254,11 @@ ROADMAP **F1** 中写：
             唯一接口： editor.value = N;  renderMarkdown();
                             │
 【要改】状态与 IO 层 —— 真正的单文档假设
-    saveContent() / loadContent()    app.js:2189 / 2193   → 按文档 id 存取
-    editor 'input' → saveContent()   app.js:1536          → 增加脏标记
-    Ctrl+S                           app.js:2066          → 写回磁盘
-    btnOpenFile / fileInput          app.js:1668–1690     → 保留为兜底入口
-    readAsText(file, 'utf-8')        app.js:1688          → BOM 嗅探 + 严格解码
+    saveContent() / loadContent()    app.js:2201 / 2205   → 按文档 id 存取
+    editor 'input' → saveContent()   app.js:1548          → 增加脏标记
+    Ctrl+S                           app.js:2078          → 写回磁盘
+    btnOpenFile / fileInput          app.js:1680–1702     → 保留为兜底入口
+    readAsText(file, 'utf-8')        app.js:1700          → BOM 嗅探 + 严格解码
                             │
 【要新建】文件系统层 + UI 层
     fs-workspace   目录枚举（懒加载 / 忽略规则）· 读 · 写 · 改名 · 删除
@@ -410,7 +410,7 @@ async function saveDoc(path, text) {
 
 ### 6.4 编码与换行符（F5-b，**数据安全的重点**）
 
-现状 `reader.readAsText(file, 'utf-8')`（app.js:1688）**已经把 GBK 文件读成乱码**了。文件夹模式要写回，这个坑会从「看着难受」升级为「**把用户原文件毁掉**」，必须一并解决。
+现状 `reader.readAsText(file, 'utf-8')`（app.js:1700）**已经把 GBK 文件读成乱码**了。文件夹模式要写回，这个坑会从「看着难受」升级为「**把用户原文件毁掉**」，必须一并解决。
 
 #### 读取流程
 
