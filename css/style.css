@@ -909,6 +909,11 @@ body {
   inset: 0;
   z-index: 1500; /* modal(1000) 之上、toast(2000) 之下 */
   display: none;
+  /* ⛔ 必须禁掉文本选中（2026-10-16 用户反馈「拖拽会选中一部分文字、选区随指针变化」）：
+     浮层里是克隆来的现成 SVG，图内文字默认 user-select:auto —— 按下就以按下点为锚点
+     落下选区，按住拖动时浏览器延伸成原生选区。浮层只是查看器，本来也不需要选字。 */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .mermaid-zoom.open { display: block; }

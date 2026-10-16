@@ -55,7 +55,7 @@ mdtu-editor/
 ├── index.html        # 页面结构 + CDN 依赖引入 + 图标声明（497 行）
 ├── Markdown.ico      # 站点图标，六帧（16/32/48/64/128/256）；页头 / 标签页 / 桌面快捷方式共用
 ├── css/
-│   └── style.css     # 全部样式：2 套主题 + 布局 + 弹窗 + 水印 + 元数据 + 设备档预览 + 文件树抽屉 + 打开与导出下拉 + 打印 + 滚动条 + Mermaid 放大浮层（1837 行）
+│   └── style.css     # 全部样式：2 套主题 + 布局 + 弹窗 + 水印 + 元数据 + 设备档预览 + 文件树抽屉 + 打开与导出下拉 + 打印 + 滚动条 + Mermaid 放大浮层（1842 行）
 ├── js/
 │   └── app.js        # 全部逻辑：解析/渲染/大纲/水印/模板/元数据/复制/导出/导出 PDF/设备档预览/文件夹模式/滚动条悬停放大/Mermaid 放大浮层（3296 行）
 ├── README.md         # 项目说明（GitHub 标准格式）
@@ -217,6 +217,10 @@ preview.innerHTML = html  ← 写入预览区
 - 三个实测坑（探针 `tools/mermaid-zoom-probe.js`）：① 克隆体必须给**明确像素尺寸**，否则在 flex 里会塌成 0×0；② mermaid 给 svg 写的**内联 `max-width` 必须清掉**，否则根本放不大；③ 克隆体**不能简单去 `id`**——mermaid 图内 `<style>` 按 `#id` 作用域写，id 一去节点样式全丢、变成**黑底**，要**整体改名**（`svg.outerHTML.split(srcId).join(zoomId)`）。
 - ⚠️ **拖拽过的那一次 `click` 必须吞掉**（回归探针 `tools/mermaid-zoom-drag.js`）。拖拽是 `pointerdown → pointermove… → pointerup`，浏览器随后会**补发一个 `click`**，而它的 target 按「按下点与抬起点的共同祖先」算——**平移时把手拖到图外再松开（极常见）**，target 就落成 `.mermaid-zoom-stage`，被「点空白关闭」判据命中 → 浮层被关掉，用户看到的就是「一放手视图就变回原样、放大也没了」。修法：`drag.moved` 置位时同时置 `swallowClick`，`box` 的 click 处理器先消费掉这一笔（`pointerdown` 时复位）。
 - ⚠️ **同一根因的第二条**：两次**快速拖拽**也会被浏览器合并成 `dblclick`（两次 click 的 target 都落在舞台上）→ 误触发「双击复位」。所以 `reset()` 由 `dragSinceDown` 守着（本次按下发生过拖拽就不复位）。另：`pointerdown` 里 `setPointerCapture` 只应**位移过 3px 阈值后**才调用，否则普通点击也会进入拖拽、`dblclick` 复位失效。
+- ⛔ **浮层必须 `user-select: none`**（2026-10-16 用户反馈「拖拽时会选中一部分文字、选区还随拖拽位置变化」）。浮层里是**克隆**来的现成 SVG，图内文字默认 `user-select: auto`：在图上**按下**就会落下选区锚点（探针实测 `getSelection().anchorNode` 恰是图内文本节点、`collapsed: true`），按住拖动时浏览器顺势把它**延伸成原生选区** —— 于是「拖到哪就选中到哪」，和拖拽平移抢同一根指针。浮层只是查看器，不需要选字，所以在 `.mermaid-zoom` 上禁掉（连 `-webkit-` 前缀一起写；**只禁浮层**，正文照旧可选）。
+  - 定位过程（隔离实验 `tools/cdp-drag-select.js` + 回归探针 `tools/mermaid-zoom-drag.js`）：`touch-action: none`、`setPointerCapture`、应用自己的拖拽处理器三类嫌疑**逐个排除**后（把 stage 的 `pointer-events` 也关掉、让应用完全不参与，现象不变）；对照组证明派发方式本身有效（正文里同一套派发稳定选中 6 字、裸页面 `foreignObject` 里稳定选中 19 字）。
+  - ⚠️ 因此回归断言**不写成「拖完读 `getSelection()` 是否为空」**：无头环境下浮层内的选区**延伸**复现不出来（属测试环境限制），那样写会得到一条永远绿的假断言。正式断言改成两层可复现的判据：① `.mermaid-zoom` / `.mermaid-zoom-stage` / `.mermaid-zoom-figure` / `figure svg foreignObject div` 的计算样式为 `none` 且浮层外**不是** `none`；② 在图内文字上**按下**时选区锚点**不得**落在浮层内。两条都做过红测（把 CSS 声明摘掉后必然失败）。
+  - ⚠️ CDP 派发要点：拖动中的 `mouseMoved` **必须同时**给 `buttons: 1` 与 `button: 'left'`（缺后一项浏览器不起选区，断言会假绿；见 `cdp-drag-select.js` 的三次稳定复现）。
 
 ---
 
@@ -362,7 +366,7 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 
 > **`data-page-node-id` 是什么？** 这份 `index.html` 一旦托管成 WorkBuddy 资料库的「页面」，页面平台就会给每个元素打上这个东西（内部叫 `pnid`），用于**节点级评论**与**「划词让 AI 改」的改动定位**（见内置 `library` 技能的 `page/edit-flow.md`）。它对运行没有任何影响，但会随 `preview.cloneNode(true)` 混进公众号与导出文件。**2026-10-13 已确认项目里零处读取它，整批清除了 312 处**；`stripEditorOnlyAttrs()`（app.js:919）留在 `copyToClipboard()`（app.js:942）与 `clonePreviewForExport()`（app.js:1117）两条克隆路径上做防御——文件若再被托管回资料库，属性会重新出现。ex-test 有一条「手动注入 pnid → 导出应剥掉」的用例锁着这段逻辑。
 
-**打印样式（`style.css:1745–1837`），六组规则：**
+**打印样式（`style.css:1755–1842`），六组规则：**
 
 1. **隐藏界面壳子**：`.app-header` / `.editor-panel` / `.resizer` / `.preview-toolbar` / `.outline-panel` / `.toast` / `.modal-overlay`
 2. **解除页面级锁定**：`html, body { height: auto; overflow: visible }`、`body { display: block }`、`.app-main { display: block; overflow: visible }`
@@ -371,7 +375,7 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 5. **`#preview { print-color-adjust: exact }`**：暗色主题按原色打印，不被浏览器「省墨」洗成白底
 6. **分页控制**：`pre` / `blockquote` / `table` / `.mermaid-rendered` / `.katex-display` / `.fm-block` 加 `break-inside: avoid`，`h1`–`h6` 加 `break-after: avoid`，`p, li` 设 `orphans: 2; widows: 2`
 
-另有 `@page { margin: 16mm }` 放在 `@media print` **之外**（`style.css:1750`，`@media print` 从 `:1754` 起）——`@page` 本身就是页面级 at-rule，放外面更直观，两条规则都有断言盯着。
+另有 `@page { margin: 16mm }` 放在 `@media print` **之外**（`style.css:1755`，`@media print` 从 `:1759` 起）——`@page` 本身就是页面级 at-rule，放外面更直观，两条规则都有断言盯着。
 
 **导出 Word 的兼容性子集（`buildWordHtml()`，app.js:1253）。** `application/msword` + `.doc` 套壳，本质仍是 HTML。Word / WPS 只认一小撮 CSS，因此：
 

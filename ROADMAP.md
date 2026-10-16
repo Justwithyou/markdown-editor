@@ -100,7 +100,7 @@ await navigator.clipboard.writeText(editor.value);
 
 B 落地时对原评估做了两处修正：① 中式排版与 KaTeX / Mermaid 的清晰度问题其实可接受——`scale` 取 2（受画布面积上限约束时自动降到 1.5 / 1），切缝用 `findBlankCut()` 找全白行，不会拦腰截断文字；② 「体积大」这一条通过 `getContext('2d', { alpha: false })` + `toDataURL('image/jpeg', 0.92)` 压下来了（10 页从 PNG 的 68 MB 降到约 1.1 MB）。**唯一不可回避的代价是文字不可检索**，这条已写进 Toast 与文档，并引导「要可检索就用打印」。超长文档撞上画布上限时会**明确拒绝并提示改用打印**，不交出截断文件。
 
-注意：`css/style.css` 当时**完全没有 `@media print` 规则**（全文 0 处），走方案 A 必须补上，否则打印结果会带上顶栏、工具栏和编辑区。落地时已补齐——`@page { margin: 16mm }` 放在 `style.css:1750`（媒体查询**之外**），`@media print { … }` 主体在 `style.css:1754` 起，整段到文末 `:1837`。
+注意：`css/style.css` 当时**完全没有 `@media print` 规则**（全文 0 处），走方案 A 必须补上，否则打印结果会带上顶栏、工具栏和编辑区。落地时已补齐——`@page { margin: 16mm }` 放在 `style.css:1755`（媒体查询**之外**），`@media print { … }` 主体在 `style.css:1759` 起，整段到文末 `:1842`。
 
 #### 4. 导出 Word — 两方案二选一
 
@@ -115,7 +115,7 @@ B 落地时对原评估做了两处修正：① 中式排版与 KaTeX / Mermaid 
 - [x] 抽出 `buildStandaloneHtml()`（规划里叫 `exportHtml()`）：主题样式 + hljs 样式 + KaTeX 样式内联，并先做 `url()` 绝对化
 - [x] 实现复制 Markdown（含 `file://` / 非安全上下文下的 `execCommand('copy')` 降级路径）
 - [x] 实现导出 HTML：**文件名按「元数据 `title` → 首个 H1 → `document`」取**（规划只写了「取首个 H1」），非法字符清洗 + 80 字符截断
-- [x] 补充 `@media print` 样式（`style.css:1750` `@page` + `:1754` `@media print`），实现**「打印」**（原方案 A）
+- [x] 补充 `@media print` 样式（`style.css:1755` `@page` + `:1759` `@media print`），实现**「打印」**（原方案 A）
 - [x] **新增「导出 PDF」下载链路**（原方案 B）：`exportPdfFile()` 离屏渲染 → A4 切片 → JPEG → `jsPDF` → `downloadBlob()`；两个库懒加载，不点不拉
 - [x] 实现导出 Word（方案 A：`application/msword` + `.doc` 套壳；`WORD_COMPAT_CSS` 用 `pt` 兜底，元数据面板降级为两列表格）
 - [x] 五个动作统一接入 Toast 成功/失败反馈；「导出 PDF」的 Toast 会说明产物是图片、要可检索请用「打印」
@@ -193,7 +193,7 @@ cd .workbuddy/tools && npm i && node ex-test.js
 
 | 问题 | 代码依据 |
 |------|----------|
-| ~~无打印样式~~ | **F1 已补齐**：`css/style.css:1750` `@page` + `:1754` `@media print` |
+| ~~无打印样式~~ | **F1 已补齐**：`css/style.css:1755` `@page` + `:1759` `@media print` |
 | 无障碍属性覆盖极少 | 仅「导出」「打开」两个下拉带了 `role="menu"` / `aria-haspopup` / `aria-expanded`（`app.js:1631` / `:1663` 同步 `aria-expanded`）；其余按钮与弹窗仍无 `aria-label` / `role="dialog"` |
 | 字体栈缺兜底 | 编辑器使用 `JetBrains Mono / Fira Code / SF Mono / Cascadia Code`，多数机器未安装，实际回退到系统默认，观感不一致 |
 | 提示无分级 | `showToast(msg, type)` 支持 `success` / `error`，但调用处几乎只用 success；失败路径（如 URL 采集失败）反馈不足 |

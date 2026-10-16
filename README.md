@@ -457,7 +457,7 @@ mdtu-editor/
 ├── index.html        # 页面结构 + CDN 依赖引入 + 图标声明（497 行）
 ├── Markdown.ico      # 站点图标（16/32/48/64/128/256 六帧），页头 / 标签页 / 窗口 / 桌面快捷方式共用
 ├── css/
-│   └── style.css     # 全部样式，含 2 套主题与水印/大纲/文件树/弹窗/打开与导出下拉/设备档预览/打印/滚动条/Mermaid 放大浮层（1837 行）
+│   └── style.css     # 全部样式，含 2 套主题与水印/大纲/文件树/弹窗/打开与导出下拉/设备档预览/打印/滚动条/Mermaid 放大浮层（1842 行）
 └── js/
     └── app.js        # 全部逻辑：解析、渲染、大纲、水印、模板、元数据、复制、导出、导出 PDF、设备档预览、文件夹模式、滚动条悬停放大、Mermaid 放大浮层（3296 行）
 ```
@@ -602,6 +602,7 @@ localStorage.removeItem('mdtu-content')
 - **滚动条放大只能改「画法」**：`.sb-hot`（`app.js` 末尾的 `initScrollbarHover()`）只把拇指的透明边框由 4px 收到 1px。**不要**在里面写 `width`——滚动条占布局宽度，一改槽宽，悬停的瞬间整篇正文就会重排。
 - **放大浮层里的克隆图别去 `id`**：`initMermaidZoom()` 把预览里的 SVG 克隆进浮层时，只能**整体改 id**（`svg.outerHTML.split(srcId).join(zoomId)`），**不能** `removeAttribute('id')`——mermaid 图内的 `<style>` 是按 `#id` 作用域写的，id 一没，节点样式全丢、变成黑底。同理，克隆体要清掉 mermaid 的内联 `max-width` 并给明确像素尺寸，否则塌成 0×0 或放不大。
 - **拖动后手抖别把浮层关掉**：拖拽结束后浏览器会补发一个 `click`，它的 target 按「按下点与抬起点的共同祖先」算——平移时把手拖到图外再松开，target 就成了舞台，会被「点空白关闭」误判。所以 `swallowClick` / `dragSinceDown` 这两个守卫**不能删**（后者还挡着「两次快速拖拽被当成 dblclick → 误复位」）。详见 DESIGN §5.5。
+- **浮层上那条 `user-select: none` 不能删**：浮层里是**克隆**来的现成 SVG，图内文字默认 `user-select: auto` —— 在图上按下就落下选区锚点，按住拖动时浏览器把它延伸成**原生选区**，于是「拖到哪就选中到哪」、和拖拽平移抢同一根指针。**只禁浮层**（`.mermaid-zoom`），不要顺手把 `.markdown-body` 也禁掉。详见 DESIGN §5.5。
 - **大纲跳转**：跳转期间会调用 `suppressSync(600)` 临时关闭双向同步滚动，否则两栏的程序化滚动会互相拉扯。
 - **水印的两套渲染**：预览走 `buildWatermarkUrl()`（CSS 背景），复制走 `injectWatermarkNodes()`（DOM 节点），两条路径需要同步维护。
 - **元数据的剥离时机**：`splitFrontMatter()` 必须在 `marked.parse()` **之前**调用。marked v4 不认识 front matter，直接把原文喂进去会被解析成 `<hr>` + 一个吞掉全部元数据的假 `<h2>`。
