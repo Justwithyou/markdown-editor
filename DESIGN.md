@@ -52,12 +52,12 @@
 
 ```
 mdtu-editor/
-├── index.html        # 页面结构 + CDN 依赖引入 + 图标声明（426 行）
+├── index.html        # 页面结构 + CDN 依赖引入 + 图标声明（497 行）
 ├── Markdown.ico      # 站点图标，六帧（16/32/48/64/128/256）；页头 / 标签页 / 桌面快捷方式共用
 ├── css/
-│   └── style.css     # 全部样式：2 套主题 + 布局 + 弹窗 + 水印 + 元数据 + 设备档预览 + 导出下拉 + 打印（1417 行）
+│   └── style.css     # 全部样式：2 套主题 + 布局 + 弹窗 + 水印 + 元数据 + 设备档预览 + 文件树抽屉 + 打开与导出下拉 + 打印 + 滚动条 + Mermaid 放大浮层（1842 行）
 ├── js/
-│   └── app.js        # 全部逻辑：解析/渲染/大纲/水印/模板/元数据/复制/导出/设备档预览（2195 行）
+│   └── app.js        # 全部逻辑：解析/渲染/大纲/水印/模板/元数据/复制/导出/导出 PDF/设备档预览/文件夹模式/滚动条悬停放大/Mermaid 放大浮层（3296 行）
 ├── README.md         # 项目说明（GitHub 标准格式）
 ├── ROADMAP.md        # 未来功能升级路线（独立文档）
 ├── DESIGN.md         # 本文档
@@ -146,7 +146,13 @@ preview.innerHTML = html  ← 写入预览区
 |------|------|
 | 左侧 `.header-left` | Logo：`📝 Markdown-Editor` |
 | 中间 `.header-center` | 主题切换（**2026-10-13 起放开供评估**）、大纲、自动编号、插入目录、方格背景、使用模板、水印 |
-| 右侧 `.header-right` | 打开文件、更多工具、外链转脚注、**导出（下拉菜单）**、**复制（primary 主按钮）** |
+| 右侧 `.header-right` | **打开（下拉菜单：文件 / 文件夹）**、更多工具、外链转脚注、**导出（下拉菜单）**、**复制（primary 主按钮）** |
+
+**装不下时怎么办。** 顶栏在 1280px 宽度下本来就装不下（F5 之前 `#btnExport` / `#btnCopy` 已落到可视区外）。现在的规则是：**中间那组退化成可横向滚动的条，右侧主操作（打开 / 导出 / 复制）永不缺席**——`.header-left` / `.header-right` 都是 `flex-shrink: 0`，`.header-center` 加 `min-width: 0; overflow-x: auto; justify-content: safe center`（`safe` 必不可少：居中溢出会把左端裁掉且滚不回去）。这与编辑工具栏 `.editor-toolbar` 的既有做法一致。
+
+**两个入口收进下拉，而不是各占一个按钮。** F5-a 落地的第一版把「文件夹」直接摆在顶栏上，于是顶栏净增一个按钮、挤掉「外链转脚注」。改为：**「打开」按钮 + 菜单里的「文件」「文件夹」两项**，与「导出」下拉共用同一套骨架（`.export-wrap` / `.export-menu` / `.export-item`），样式表只补 `#openWrap.single .export-caret`（不支持文件夹 API 时菜单只剩一项，收掉箭头）。
+
+**下拉菜单宽度跟着内容走。** 早先 `.export-menu` 写死 `min-width: 216px`，加上 `.export-item .export-ext` 的 `margin-left: auto`，短标签行的右侧会空出一大块。现在菜单是 `width: max-content; min-width: 0; max-width: 260px`，`.export-ext` 只保留 `margin-left: 8px` 的自然间距——**两个下拉（打开 / 导出）都收缩到实际内容宽度**，实测 172–174px 且行内标签到后缀的间隙 ≤12px，有真实浏览器的宽断言盯着。
 
 ### 5.2 主区双栏（`.app-main`）
 
@@ -165,7 +171,7 @@ preview.innerHTML = html  ← 写入预览区
 ```
 
 - **编辑面板**：编辑工具栏（18 个语法插入按钮 + URL 采集 + 清空）→ textarea 编辑器 → 状态栏（字符/词/行统计）。
-- **预览面板**：预览工具栏（**设备档一组平铺档位按钮**、元数据档位、同步滚动、全屏、全屏页宽控件）→ `.preview-scroll`（带动画的滚动容器）→ `.preview-wrap`（真正的滚动容器）→ `.markdown-body`（渲染正文）。
+- **预览面板**：预览工具栏（**设备档一组平铺档位按钮**、元数据档位、同步滚动、全屏、全屏页宽控件）→ `.preview-scroll`（带动画的滚动容器）→ `.preview-wrap`（真正的滚动容器）→ `.markdown-body`（渲染正文）。全屏时**设备档整组与「退出全屏」之外的控件一起被 JS 收起**（见 7.9）。
 - **分隔条 `.resizer`**：可拖拽调整两栏比例（`mousedown/mousemove/mouseup`，15%–85% 范围限制）。
 
 ### 5.3 弹窗组件
@@ -177,7 +183,44 @@ preview.innerHTML = html  ← 写入预览区
 | `#linksModal` | 760px (modal-lg) | 工具/开源项目导航（三 Tab） |
 | `#watermarkModal` | 680px (modal-md) | 水印设置（左表单 + 右预览） |
 
-另有悬浮组件：文档大纲 `.outline-panel`（右侧垂直居中悬浮）、Toast 提示 `.toast`。
+另有悬浮组件：文档大纲 `.outline-panel`（右侧垂直居中悬浮）、**文件树抽屉 `.file-tree-panel`**（左侧，F5，见 7.10）、**抽屉入口 `.tree-peek`**（抽屉收起后浮在内容上层的 44×44 实心蓝圆球，按下变橙，可拖动、位置记在 `mdtu-tree-peek-pos`，只在「有工作区 + 抽屉收起」时出现）、Toast 提示 `.toast`。
+
+### 5.4 滚动条（悬停放大）
+
+文档长时预览区右侧会出现滚动条，8px 太细不好抓（双屏下鼠标很容易顺势滑到另一块屏幕）。做法是**槽宽恒定 14px、只把拇指「画粗」**：
+
+| 状态 | 触发 | 拇指视觉宽度 | 颜色 |
+|------|------|--------------|------|
+| 常态 | — | 6px（`border: 4px solid transparent` + `background-clip: content-box`） | `--border-strong` |
+| 放大 | 指针进右缘 18px 带内（容器加 `.sb-hot`）或直接悬停在拇指上 | 12px（`border-width: 1px`） | `#94a3b8` |
+
+- 判定在 `app.js` 末尾的 `initScrollbarHover()`：`clientX ≥ rect.right − HOT_BAND(18)` **且** `scrollHeight > clientHeight`（没出滚动条就不放大）；`mouseleave` / `blur` 一律摘掉 `.sb-hot`。
+- **⚠️ 核心不变式：放大只能改「画法」，绝不能改槽宽。** 滚动条占布局宽度，一旦在 `.sb-hot` 里写 `width`，悬停瞬间内容宽度变化 → **整篇正文重排**。放大只动透明边框（4px → 1px），槽宽自始至终 14px。
+- 同一组规则同时服务 `.preview-wrap`（预览）与 `.editor`（textarea）。原先写的 `.editor-wrap::-webkit-scrollbar` 是**死规则**——真正滚动的是 textarea 自己，本次一并改对。
+- 打印 / 导出 PDF 不受影响：打印时 `.preview-wrap` 被解除 `overflow`，压根不出现滚动条。
+
+### 5.5 Mermaid 图点击放大
+
+预览里的 Mermaid 图可以直接点开全屏查看（`app.js` 末尾的 `initMermaidZoom()`，2026-10-15）。放进浮层的是**克隆**来的现成 SVG，不是重新渲染 → 与预览像素级一致、矢量放大不糊。
+
+| 项 | 取值 |
+|----|------|
+| 入口 | 预览里**所有** Mermaid 图（`.mermaid-rendered` 上给 `cursor: zoom-in`）；图内 `<a>` 链接不抢点击 |
+| 初始 | 「适应窗口」，且**最多放大到原图 2 倍**（`FIT_MAX`，小图不会被拉成巨无霸） |
+| 交互 | 滚轮缩放（以指针为锚点，0.2×–4×）、按住拖拽平移、双击复位、`Esc` / 点空白 / 右上 ✕ 关闭 |
+| 外观 | iOS 毛玻璃遮罩 `rgba(246,248,251,.72)` + `backdrop-filter: blur(20px) saturate(180%)`；`z-index: 1500`（modal 1000 之上、toast 2000 之下） |
+
+- 浮层挂在 `<body>` 下（**不在 `#preview` 内**）→ 导出 HTML / 复制公众号 / 导出 Word 三条产物都看不到它，零污染；`@media print` 里再隐藏一份做防御。
+- Esc 走**捕获阶段 + `stopImmediatePropagation()`**：文件里已有 4 处 Esc 消费者（导出菜单 / 打开菜单 / 退出全屏 / 水印弹窗），浮层只关自己——全屏预览里按 `Esc` 不会顺手退出全屏。
+- 点击绑在 `#preview` 上做**事件委托**（图每次重渲染都会换节点）。
+- 浮层不在 `.markdown-body` 内，继承不到图内度量回钉 → `.mermaid-zoom-figure svg *` **再带一份**同样的取值（见 6.1「Mermaid」条）。
+- 三个实测坑（探针 `tools/mermaid-zoom-probe.js`）：① 克隆体必须给**明确像素尺寸**，否则在 flex 里会塌成 0×0；② mermaid 给 svg 写的**内联 `max-width` 必须清掉**，否则根本放不大；③ 克隆体**不能简单去 `id`**——mermaid 图内 `<style>` 按 `#id` 作用域写，id 一去节点样式全丢、变成**黑底**，要**整体改名**（`svg.outerHTML.split(srcId).join(zoomId)`）。
+- ⚠️ **拖拽过的那一次 `click` 必须吞掉**（回归探针 `tools/mermaid-zoom-drag.js`）。拖拽是 `pointerdown → pointermove… → pointerup`，浏览器随后会**补发一个 `click`**，而它的 target 按「按下点与抬起点的共同祖先」算——**平移时把手拖到图外再松开（极常见）**，target 就落成 `.mermaid-zoom-stage`，被「点空白关闭」判据命中 → 浮层被关掉，用户看到的就是「一放手视图就变回原样、放大也没了」。修法：`drag.moved` 置位时同时置 `swallowClick`，`box` 的 click 处理器先消费掉这一笔（`pointerdown` 时复位）。
+- ⚠️ **同一根因的第二条**：两次**快速拖拽**也会被浏览器合并成 `dblclick`（两次 click 的 target 都落在舞台上）→ 误触发「双击复位」。所以 `reset()` 由 `dragSinceDown` 守着（本次按下发生过拖拽就不复位）。另：`pointerdown` 里 `setPointerCapture` 只应**位移过 3px 阈值后**才调用，否则普通点击也会进入拖拽、`dblclick` 复位失效。
+- ⛔ **浮层必须 `user-select: none`**（2026-10-16 用户反馈「拖拽时会选中一部分文字、选区还随拖拽位置变化」）。浮层里是**克隆**来的现成 SVG，图内文字默认 `user-select: auto`：在图上**按下**就会落下选区锚点（探针实测 `getSelection().anchorNode` 恰是图内文本节点、`collapsed: true`），按住拖动时浏览器顺势把它**延伸成原生选区** —— 于是「拖到哪就选中到哪」，和拖拽平移抢同一根指针。浮层只是查看器，不需要选字，所以在 `.mermaid-zoom` 上禁掉（连 `-webkit-` 前缀一起写；**只禁浮层**，正文照旧可选）。
+  - 定位过程（隔离实验 `tools/cdp-drag-select.js` + 回归探针 `tools/mermaid-zoom-drag.js`）：`touch-action: none`、`setPointerCapture`、应用自己的拖拽处理器三类嫌疑**逐个排除**后（把 stage 的 `pointer-events` 也关掉、让应用完全不参与，现象不变）；对照组证明派发方式本身有效（正文里同一套派发稳定选中 6 字、裸页面 `foreignObject` 里稳定选中 19 字）。
+  - ⚠️ 因此回归断言**不写成「拖完读 `getSelection()` 是否为空」**：无头环境下浮层内的选区**延伸**复现不出来（属测试环境限制），那样写会得到一条永远绿的假断言。正式断言改成两层可复现的判据：① `.mermaid-zoom` / `.mermaid-zoom-stage` / `.mermaid-zoom-figure` / `figure svg foreignObject div` 的计算样式为 `none` 且浮层外**不是** `none`；② 在图内文字上**按下**时选区锚点**不得**落在浮层内。两条都做过红测（把 CSS 声明摘掉后必然失败）。
+  - ⚠️ CDP 派发要点：拖动中的 `mouseMoved` **必须同时**给 `buttons: 1` 与 `button: 'left'`（缺后一项浏览器不起选区，断言会假绿；见 `cdp-drag-select.js` 的三次稳定复现）。
 
 ---
 
@@ -189,7 +232,7 @@ preview.innerHTML = html  ← 写入预览区
 - **双向同步滚动**：编辑区与预览区按滚动比例互相映射，可关闭（`#btnPreviewScroll`）。
 - **代码高亮**：marked `highlight` 回调 → `hljs.highlight / highlightAuto`。
 - **数学公式**：KaTeX auto-render，支持 `$...$` / `$$...$$` / `\(...\)` / `\[...\]`。
-- **Mermaid**：识别 `code.language-mermaid`，异步渲染为内联 SVG。
+- **Mermaid**：识别 `code.language-mermaid`，异步渲染为内联 SVG（`renderMermaidFromDOM()`，app.js:602）。**图内排版度量必须"回钉"**：mermaid 先用**字体原生的 `normal` 行高**（16px 字号下 trebuchet ms ≈19px/行、中文字体回退 ≈24px/行）把节点框与 `foreignObject` 量好，再把文字画进同样大小的框里——**超出部分会被直接裁掉**。而主题与设备档的行高 / 字距 / 字体是继承下来的，会顺着 SVG 漏进 `foreignObject` 里的标签 div，把文字撑得比框更高更宽 → 每个节点的字被切掉一截（APP 档最明显：行高 1.75 + 字距 +.5px，纵向裁 4px、横向最宽裁 12px）。⚠️ **钉固定倍数同样错**：行高 1.5 对中文恰好等于其量算值、对拉丁文却每行多 5px（24 vs 19），两行标签就裁 10px（2026-10-15 二修）。修法是把 SVG 内部的度量钉回 mermaid 的**量算条件**（16px / `normal` / 无字距 / 无外边距），四处平行：`style.css` 的 `.mermaid-rendered svg *` + 三个产物（导出 HTML / 复制公众号 / 导出 Word）共用的 `MERMAID_LOCK_CSS`（app.js:1082）。
 - **GFM 语法**：表格、任务列表、删除线、引用等由 marked 原生支持。
 
 ### 6.2 微信排版（核心场景）
@@ -206,18 +249,19 @@ preview.innerHTML = html  ← 写入预览区
 | 功能 | 说明 |
 |------|------|
 | 文档大纲 | 扫描 H1–H6，点击左（源码）右（预览）双栏联动跳转 |
-| 全屏预览 | 预览区全屏 + Esc 退出 |
-| 页宽调节 | 窄 680 / 中 880 / 宽 1100 / 超宽 1400 / 全屏宽（纸张感） |
+| 全屏预览 | 预览区全屏 + Esc 退出；进全屏即**锁定当前设备档**（设备档整组隐藏），iPad / APP 档不给页宽 |
+| 页宽调节 | 窄 680 / 中 880 / 宽 1100 / 超宽 1400 / 全屏宽（纸张感）；**仅 PC 档可用** |
 | 自动编号 | H1–H3 多级编号 |
 | 插入目录 | 自动生成 TOC |
 | 方格背景 | 便于截图对齐 |
-| 打开文件 | 读本地 `.md/.markdown/.txt/.mdx` |
+| 打开文件 | 「打开」下拉里的**「文件」**：读本地 `.md/.markdown/.txt/.mdx` |
+| 打开文件夹 | 「打开」下拉里的**「文件夹」**：F5-a 只读文件树（见 7.10） |
 | 文档元数据 | 识别首部 YAML Front Matter，渲染为顶部「属性」面板（类型图标 + 标签 / 布尔 / 日期类型化，三档展示，见 7.7） |
 | URL 采集 | 输入网址抓正文转 Markdown |
 | 更多工具 | 内置同类工具与开源项目导航（三 Tab） |
 | 主题 | 2 套文章主题（GitHub / 晴空蓝，见第 8 节） |
 | 预览模式 | 设备档（PC / iPad / APP）平铺档位；每档内建该尺寸下的阅读场景（Web / Web + 平板适配 / 公众号），只影响预览、不进产物（见 7.9） |
-| 导出 | 复制 Markdown 源码 / 导出 HTML / 导出 PDF（打印）/ 导出 Word（`.doc`），详见 7.8 |
+| 导出 | 复制 Markdown 源码 / 导出 HTML / 导出 PDF（下载）/ 导出 Word（`.doc`）/ 打印，详见 7.8 |
 
 ### 6.4 持久化
 
@@ -246,18 +290,18 @@ preview.innerHTML = html  ← 写入预览区
 
 克隆预览 → **摘掉 `[data-fm-ui]` 元数据标题行** → 清空背景 → 注入 `getThemeStyles(theme)` 的 `<style>` 块 → 注入 DOM 水印 → `Range` 选区 + `execCommand('copy')`，失败则降级为纯文本复制。用废弃但兼容性最好的 `execCommand` 实现富文本复制。
 
-### 7.5 大纲双向联动（app.js:1620–1883）
+### 7.5 大纲双向联动（app.js:1827–2089）
 
 - `getSourceHeadings()`：扫描源码 ATX 标题（跳过围栏代码块）记录行号。
 - `buildOutline()`：把预览区 `<h1..h6>` 通过「层级 + 归一化文本」匹配回源码行号。
 - 点击跳转：编辑器用镜像 div 测量行偏移后平滑滚动；预览区用 `getBoundingClientRect` 差值滚动。
 - `suppressSync(600)`：跳转期间临时关闭双向同步，避免两栏互相拉扯。
 
-### 7.6 同步滚动（app.js:1404 起）
+### 7.6 同步滚动（app.js:1553 起）
 
 编辑区与预览区滚动事件互相映射，按 `scrollTop / (scrollHeight - clientHeight)` 比例同步；`syncBlocked()` 判断抑制窗口。**真正的滚动容器是 `#previewWrap`**（`overflow:auto` 在它身上），不是 `#previewScroll`。
 
-### 7.7 文档元数据（Front Matter，app.js:328–547）
+### 7.7 文档元数据（Front Matter，app.js:328–545）
 
 形态：**Obsidian 风格的「属性」面板**——圆角卡片，一行一个属性（`类型图标 + 键 + 值`），键列定宽使值左边缘对齐，行间一条极淡分隔线，顶部一行 `属性 · n 项` 小标题。**嵌套对象与数组递归展开**：分组键渲染为「容器行」（右侧显示直接子项数），子级缩进并由左侧竖线标出层次，数组元素以 `[0]` `[1]` 作行标。
 
@@ -283,18 +327,29 @@ preview.innerHTML = html  ← 写入预览区
 
 **为什么不用现成的树查看器**：Obsidian 的 `nested-properties` / `nested-frontmatter-properties` 都依赖 Obsidian 内部 API，不能用于独立网页；Front Matter CMS 是 VS Code 扩展工程；通用 JSON 树查看器（JsonTree.js、`@vdonec/json-view`、tree.json）虽然是 CDN 可引入的 UMD，但观感是「代码调试器」，且**输出 class 样式**——与「元数据必须内联样式才能在公众号存活」这条硬约束直接冲突，也不认 YAML 语义类型。结论是只借交互模型、渲染自己写，代价约 30 行递归，换来零新增依赖。
 
-### 7.8 导出能力（`// ===== Export (F1) =====`，app.js:1041–1332）
+### 7.8 导出能力（`// ===== Export (F1) =====`，app.js:1041–1328；`// ===== 导出 PDF（下载）=====`，app.js:1330–1496）
 
-顶栏「复制」**左侧**新增**「导出」下拉**（`index.html:94–124`，样式 `style.css:164–238`），把四个动作收进一个菜单，避免顶栏按钮继续横向膨胀。四个动作全部通过**浏览器下载**落盘（`Blob` + `URL.createObjectURL` + `<a download>`），不经过任何服务端；**零新增依赖**。
+顶栏「复制」**左侧**新增**「导出」下拉**（`index.html:118–152`，样式 `style.css:181–282`），把五个动作收进一个菜单，避免顶栏按钮继续横向膨胀。除「打印」外的四个动作全部通过**浏览器下载**落盘（`Blob` + `URL.createObjectURL` + `<a download>`），不经过任何服务端；**零新增运行时依赖**——`html2canvas` / `jsPDF` 只在第一次点「导出 PDF」时才从 CDN 拉（`loadScriptOnce()` app.js:1341 + `ensureLib()` app.js:1360）。
 
 | 动作 | `data-export` | 实现 | 产物 |
 |---|---|---|---|
 | 复制 Markdown | `md` | `navigator.clipboard.writeText(editor.value)`，失败降级 `document.execCommand('copy')` | 剪贴板（纯文本） |
-| 导出 HTML | `html` | `buildStandaloneHtml()`（app.js:1180）→ `downloadBlob()` | `text/html` / `.html` |
-| 导出 PDF | `pdf` | `window.print()` + `@media print` | 打印对话框 → 另存为 PDF |
-| 导出 Word | `word` | `buildWordHtml()`（app.js:1241）→ `downloadBlob()` | `application/msword` / `.doc` |
+| 导出 HTML | `html` | `buildStandaloneHtml()`（app.js:1191）→ `downloadBlob()` | `text/html` / `.html` |
+| 导出 PDF | `pdf` | `exportPdfFile()`（app.js:1390）：离屏渲染 → A4 切片 → `jsPDF.addImage` → `downloadBlob()` | `application/pdf` / `.pdf`（**直接下载**） |
+| 导出 Word | `word` | `buildWordHtml()`（app.js:1253）→ `downloadBlob()` | `application/msword` / `.doc` |
+| 打印 | `print` | `printDocument()`（app.js:1324）＝ `window.print()` + `@media print` | 系统打印对话框（可选「另存为 PDF」） |
 
-**导出 HTML 的自包含性（`buildStandaloneHtml()`，app.js:1180）。** 组装顺序有语义，已被静态断言锁定：
+**「导出 PDF」与「打印」为什么拆成两条路。** 原先只有一条（`window.print()`），菜单里却叫「导出 PDF」，用户点下去得到的是一个打印对话框，认知落差大。现在按**产物形态**分开：
+
+- **导出 PDF（下载）**：`exportPdfFile()` 把 `clonePreviewForExport()` 挂到一个 900px 宽的离屏舞台（`PDF_STAGE_W` app.js:1371），`html2canvas` 出整张长图 → 按 A4 可用高度（`PDF_USABLE_H` app.js:1370，A4 高 841.89pt 减上下各 24pt 边距）逐段切片 → `findBlankCut()`（app.js:1375）在目标切点附近向下找一行**全白**像素再切，避免把一行字拦腰截断 → 每片 `canvas.toDataURL('image/jpeg', 0.92)` → `pdf.addImage(..., 'JPEG', …)`。点一下就拿到文件。
+  - **代价必须说清**：PDF 里是图片，**文字不可选中、不可检索**；这条写进了 Toast 与 README「已知限制」。
+  - **像素密度自适应**：浏览器对画布总面积有上限，超了会静默失败或出白纸。渲染前先估面积，`scale` 依次降 2 → 1.5 → 1；连 1 倍都放不下就**明确拒绝并提示改用「打印」**，绝不交出一份被截断的文档。
+  - **体积教训**：最初用 PNG 切片，10 页 68 MB；改为 `getContext('2d', { alpha: false })`（省掉 alpha 通道）+ JPEG 0.92 后，同样内容约 1.1 MB。
+- **打印**：仍是原来的 `printDocument()` → `window.print()`，输出**矢量、文字可选**，只是不再对外宣称是「导出 PDF」；需要在对话框里选「另存为 PDF」，这一步现在由用户自己决定。
+
+`runExport(kind)`（app.js:1479）负责分发：`'print' → printDocument()`、`'pdf' → exportPdfFile()`，其余保持原下载路径。
+
+**导出 HTML 的自包含性（`buildStandaloneHtml()`，app.js:1191）。** 组装顺序有语义，已被静态断言锁定：
 
 ```
 EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / KaTeX）
@@ -304,14 +359,14 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 三点必须记住：
 
 1. **外壳样式必须排在主题样式之前**。主题样式会在 `body, div` 上声明背景色；外壳（`body { margin: 0; padding: 24px 16px }` 等）若排在后面，深色文档会变成「白底浅字」。
-2. **CSS 里的 `url()` 必须绝对化**（`absolutizeCssUrls()`，app.js:1145）。KaTeX 的 `@font-face` 写的是 `url(fonts/KaTeX_*.woff2)`，内联后相对路径会以**导出文件所在目录**为基准 → 字体全 404、公式退回系统字体。白名单跳过 `data:` / `http(s):` / `//` / `#`。
-3. **取不到就回退，不能静默丢**。`readCssText()`（app.js:1118）先走 CSSOM（`document.styleSheets[i].cssRules`，跨域读会抛 `SecurityError`），再走 `fetch(href, { mode: 'cors' })`；两条都失败时 `collectExportCss()` 把 href 记进 `fallback`，最终渲染成 `<link rel="stylesheet" href="https://…">`。取到的文本缓存在 `exportCssCache`（app.js:1117），避免两次导出重复拉取。
+2. **CSS 里的 `url()` 必须绝对化**（`absolutizeCssUrls()`，app.js:1156）。KaTeX 的 `@font-face` 写的是 `url(fonts/KaTeX_*.woff2)`，内联后相对路径会以**导出文件所在目录**为基准 → 字体全 404、公式退回系统字体。白名单跳过 `data:` / `http(s):` / `//` / `#`。
+3. **取不到就回退，不能静默丢**。`readCssText()`（app.js:1129）先走 CSSOM（`document.styleSheets[i].cssRules`，跨域读会抛 `SecurityError`），再走 `fetch(href, { mode: 'cors' })`；两条都失败时 `collectExportCss()` 把 href 记进 `fallback`，最终渲染成 `<link rel="stylesheet" href="https://…">`。取到的文本缓存在 `exportCssCache`（app.js:1128），避免两次导出重复拉取。
 
-导出前先 `clonePreviewForExport()`（app.js:1106）克隆预览子树，并摘掉三类**属于应用 UI、不该进导出文件**的东西：行内残留的 `style` 属性（如方格背景）、`grid-bg` class，以及 `data-page-node-id` 这类**编辑器专用属性**。元数据 YAML 原文则以 HTML 注释保留（`exportFrontMatterComment()`，app.js:1175），方便拿到文件后二次编辑。
+导出前先 `clonePreviewForExport()`（app.js:1117）克隆预览子树，并摘掉三类**属于应用 UI、不该进导出文件**的东西：行内残留的 `style` 属性（如方格背景）、`grid-bg` class，以及 `data-page-node-id` 这类**编辑器专用属性**。元数据 YAML 原文则以 HTML 注释保留（`exportFrontMatterComment()`，app.js:1186），方便拿到文件后二次编辑。
 
-> **`data-page-node-id` 是什么？** 这份 `index.html` 一旦托管成 WorkBuddy 资料库的「页面」，页面平台就会给每个元素打上这个东西（内部叫 `pnid`），用于**节点级评论**与**「划词让 AI 改」的改动定位**（见内置 `library` 技能的 `page/edit-flow.md`）。它对运行没有任何影响，但会随 `preview.cloneNode(true)` 混进公众号与导出文件。**2026-10-13 已确认项目里零处读取它，整批清除了 312 处**；`stripEditorOnlyAttrs()`（app.js:919）留在 `copyToClipboard()`（app.js:942）与 `clonePreviewForExport()`（app.js:1106）两条克隆路径上做防御——文件若再被托管回资料库，属性会重新出现。ex-test 有一条「手动注入 pnid → 导出应剥掉」的用例锁着这段逻辑。
+> **`data-page-node-id` 是什么？** 这份 `index.html` 一旦托管成 WorkBuddy 资料库的「页面」，页面平台就会给每个元素打上这个东西（内部叫 `pnid`），用于**节点级评论**与**「划词让 AI 改」的改动定位**（见内置 `library` 技能的 `page/edit-flow.md`）。它对运行没有任何影响，但会随 `preview.cloneNode(true)` 混进公众号与导出文件。**2026-10-13 已确认项目里零处读取它，整批清除了 312 处**；`stripEditorOnlyAttrs()`（app.js:919）留在 `copyToClipboard()`（app.js:942）与 `clonePreviewForExport()`（app.js:1117）两条克隆路径上做防御——文件若再被托管回资料库，属性会重新出现。ex-test 有一条「手动注入 pnid → 导出应剥掉」的用例锁着这段逻辑。
 
-**导出 PDF 的打印样式（`style.css:1328–1417`），六组规则：**
+**打印样式（`style.css:1755–1842`），六组规则：**
 
 1. **隐藏界面壳子**：`.app-header` / `.editor-panel` / `.resizer` / `.preview-toolbar` / `.outline-panel` / `.toast` / `.modal-overlay`
 2. **解除页面级锁定**：`html, body { height: auto; overflow: visible }`、`body { display: block }`、`.app-main { display: block; overflow: visible }`
@@ -320,16 +375,16 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 5. **`#preview { print-color-adjust: exact }`**：暗色主题按原色打印，不被浏览器「省墨」洗成白底
 6. **分页控制**：`pre` / `blockquote` / `table` / `.mermaid-rendered` / `.katex-display` / `.fm-block` 加 `break-inside: avoid`，`h1`–`h6` 加 `break-after: avoid`，`p, li` 设 `orphans: 2; widows: 2`
 
-另有 `@page { margin: 16mm }` 放在 `@media print` **之外**（`style.css:1332`）——`@page` 本身就是页面级 at-rule，放外面更直观，两条规则都有断言盯着。
+另有 `@page { margin: 16mm }` 放在 `@media print` **之外**（`style.css:1755`，`@media print` 从 `:1759` 起）——`@page` 本身就是页面级 at-rule，放外面更直观，两条规则都有断言盯着。
 
-**导出 Word 的兼容性子集（`buildWordHtml()`，app.js:1241）。** `application/msword` + `.doc` 套壳，本质仍是 HTML。Word / WPS 只认一小撮 CSS，因此：
+**导出 Word 的兼容性子集（`buildWordHtml()`，app.js:1253）。** `application/msword` + `.doc` 套壳，本质仍是 HTML。Word / WPS 只认一小撮 CSS，因此：
 
 - **不认 `em`**：`WORD_COMPAT_CSS`（app.js:1064）一律用 `pt`（正文 12pt、h1 20pt、h2 16pt、h3 14pt、`pre` 10pt）
-- **不认 flex**：元数据面板经 `fmPanelToTable()`（app.js:1203）降级为 `<tr><td>键</td><td>值</td></tr>`，`.fm-row` 递归摊平，嵌套层级用缩进表达
+- **不认 flex**：元数据面板经 `fmPanelToTable()`（app.js:1215）降级为 `<tr><td>键</td><td>值</td></tr>`，`.fm-row` 递归摊平，嵌套层级用缩进表达
 - **MSO 头**：`<w:WordDocument><w:View>Print</w:View>` + `@page WordSection1`，让 Word 以「页面视图」而非「Web 版式」打开
 - **不带水印**：水印的两条实现（SVG data URI 背景 / 绝对定位 `<span>`）在 Word 里都不可靠，索性不写入
 
-**文件名规则（`getDocBaseName()`，app.js:1100）。** 优先取元数据 `title` → 正文首个 H1 → 兜底 `document`；再过 `sanitizeFileName()`（app.js:1087）清洗 Windows 非法字符（`\ / : * ? " < > |`）、剥掉 Markdown 强调标记与 `[文字](链接)` 的链接部分，并截断到 80 字符。
+**文件名规则（`getDocBaseName()`，app.js:1111）。** 优先取元数据 `title` → 正文首个 H1 → 兜底 `document`；再过 `sanitizeFileName()`（app.js:1098）清洗 Windows 非法字符（`\ / : * ? " < > |`）、剥掉 Markdown 强调标记与 `[文字](链接)` 的链接部分，并截断到 80 字符。
 
 **顺带修复的既有回归：`unfoldDisplayMath()`（app.js:642）。** `breaks: true` 会把段落内换行变成 `<br>`，于是多行写的块级公式在 DOM 里成了 `<p>$$<br>\int…<br>$$</p>`。KaTeX 的 auto-render 按**文本节点**匹配定界符，`$$` 被 `<br>` 拆成多个文本节点后就再也配不上——**整个块级公式不渲染**（行内 `$x$` 不跨行，因此不受影响）。修复：`renderMath()`（app.js:651）开头先调 `unfoldDisplayMath()`，对「整段就是一个块级公式」（`$$…$$` 或 `\[…\]`）的段落把 `<br>` 换回 `\n`，合回单个文本节点。
 
@@ -337,7 +392,7 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 
 ### 7.9 预览模式：设备档
 
-同一篇稿子在 PC、平板、手机上的观感差别很大，而这个差别只有到发布那一刻才暴露。预览工具栏左侧的**一组设备档按钮**（`index.html:236–242`）把这个差别提前搬到预览里。
+同一篇稿子在 PC、平板、手机上的观感差别很大，而这个差别只有到发布那一刻才暴露。预览工具栏左侧的**一组设备档按钮**（`index.html:265–271`）把这个差别提前搬到预览里。
 
 **一、只有设备一个维度，平台规则内建在档位里。** 早期版本把「设备端」与「展示端（Web / 公众号 / 掘金）」拆成两个正交维度，后来**合并成一维**——因为每档设备其实只对应一种典型阅读场景，让用户自由组合反而会造出「PC × 公众号」这种现实中不存在的组合：
 
@@ -375,7 +430,7 @@ preview.className = [
 
 全文**只允许这一处写 `preview.className = [`**（ex-test 有断言 `eq((appSrc.match(/preview\.className = \[/g)||[]).length, 1)` 锁着）。任何一处直接整串覆盖，都会把其余几维静默冲掉——这是多维共存能被破坏的唯一方式。`applyTheme()` / `applyDevice()` 都只改 `state` 再调它，方格背景按钮也从 `classList.toggle('grid-bg', …)` 改为同一出口。
 
-**四、版心：设备视口压一道 820px 上限（`style.css:452`）。**
+**四、版心：设备视口压一道 820px 上限（`style.css:498–500`）。**
 
 ```css
 .markdown-body {
@@ -403,7 +458,7 @@ preview.className = [
 
 iPad 档则相反，**不套**公众号那套字距与折行——它模拟的是「在平板上浏览网页」，所以保持 Web 排版，只把正文放大到 17px、行高放宽到 1.7、内边距加宽，并按平板屏宽收一点标题字号。
 
-**七、模式类不进产物（`stripPreviewModeClasses()`，app.js:931）。** `device-*` 是**观察工具**，不是文章内容：模拟出来的版心与字号若被当成真实排版带进公众号或导出文件，就是错的。它和方格背景、`data-page-node-id` 一样，在**两条克隆路径**（`copyToClipboard()` app.js:942、`clonePreviewForExport()` app.js:1106）上被摘掉：
+**七、模式类不进产物（`stripPreviewModeClasses()`，app.js:931）。** `device-*` 是**观察工具**，不是文章内容：模拟出来的版心与字号若被当成真实排版带进公众号或导出文件，就是错的。它和方格背景、`data-page-node-id` 一样，在**两条克隆路径**（`copyToClipboard()` app.js:942、`clonePreviewForExport()` app.js:1117）上被摘掉：
 
 ```js
 const cloned = stripPreviewModeClasses(stripEditorOnlyAttrs(preview.cloneNode(true)));
@@ -419,7 +474,43 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 | iPad | 768px | 696px | 17px | 1.7 | normal | 可横向滚动 |
 | APP | 375px | 343px | 17px | 1.75 | 0.5px | 折行（`white-space: pre-wrap`） |
 
+**九、全屏 = 锁定当前档位。** 全屏是「安静读」的场景，进去之后不该还能来回切档。`enterFullscreen()` 做三件事：把设备档整组（`#previewModeGroup`）`display:none`；**页宽组只在 PC 档显示**——iPad / APP 的版心由 `--dev-max` 决定，而页宽走的是 inline `max-width`，叠上去会直接压掉版心，两者互相打架，所以非 PC 档索性不给；进入前是 iPad / APP 档时，把上一次遗留的 inline `max-width` 与 `page-mode` 清掉，**把版心交还给设备档**。`.device-*` class 一直挂在 `#preview` 上、全屏期间不动，所以「按当前档位渲染」不需要额外代码。退出全屏（按钮或 `Esc`）再把这几个 `display` 还原。
+
 `applyDevice()`（app.js:903）负责落盘（`mdtu-device`）、同步按钮激活态（`syncSegBtns()`）与 `previewScroll.classList.toggle('device-frame', …)`（非 PC 档压深底衬，设备边界才看得见）；`init()` 里用 `pickSaved()` 校验存档值后套用。**切换不弹 Toast**：档位本身就写着 `PC` / `iPad` / `APP`、按钮高亮即选中态，变的是正文本身；再弹一个浮层挡住正文并停留 2.5s，是纯粹的信息噪声。工具栏上也不写「设备」二字——三个档位自明，多一个标签只是占掉横向空间。
+
+---
+
+### 7.10 文件夹模式（F5-a，只读）
+
+`js/app.js` 末尾的 `// ===== F5：文件夹模式（只读）=====` 段。目标是「打开一个本地目录 → 文件树 → 点节点切换文档」，**本期全程不写盘**：不保存、不新建、不重命名、不删除。
+
+**能力探测分三层，逐层降级**。探测只判函数是否存在——该 API 由 `[SecureContext]` 门控，非安全上下文里连函数都不存在，所以这一行同时蕴含了「当前是不是安全上下文」：
+
+| 层 | 判据 | 结果 |
+|---|------|------|
+| ① | `typeof window.showDirectoryPicker === 'function'` | 完整模式：能拿到目录句柄（Edge / Chrome，`file://` 亦可用） |
+| ② | `'webkitdirectory' in input` | 只读快照模式：`<input webkitdirectory>` 给的扁平文件列表，按 `webkitRelativePath` 补出树 |
+| ③ | 都不成立（Firefox / Safari） | **入口与抽屉整块从 DOM 摘掉**，退回单文档模式 |
+
+**节点模型**：`{ name, kind, path, ref, children, loaded, loading, error }`。`path` 是工作区内的相对路径，同时充当文档 id；`ref` 在完整模式下是 `FileSystemHandle`、在快照模式下是 `File` 对象；`children === null` 表示「还没枚举过」，空数组才是「真的是空目录」。
+
+**枚举是懒的，但为了剪掉空壳目录会往下探一层。** 真正把子项铺开只发生在「已展开」的目录（`loadChildren()` 里的 `for await (const h of node.ref.values())`），子目录点开才递归读——不这么做，几千文件的目录会直接卡死 UI。但「这个目录里到底有没有文档」得先知道，才谈得上不显示它，所以 `loadChildren()` 会对每个子目录调一次 `hasMarkdownDeep()`：**见到第一个 `.md` 立刻返回**（常规文档目录只读几个条目），并带 `TREE_PROBE_MAX` 预算——累计扫过的条目数到顶就一律判「有」，宁可多留一个目录，也不因为预算用尽就错杀一整棵有文档的子树。默认忽略 `node_modules` / `.git` / `dist` / `build` / `out` / `.next` / `.venv` / `__pycache__` / `.DS_Store`，命中即整棵剪掉；排序是「目录在前、文件在后」+ `localeCompare(zh, { numeric: true })`（`numeric` 必需，否则 `第10章` 会排到 `第2章` 前面）。单个子目录读失败只局部标红，**不中断整棵树**。
+
+**只展示 Markdown，没有文档的目录整条不进树。** 树的构建把过滤**放在枚举层**（`loadChildren()` 里 `isMdName()` 不过关直接丢掉、不入队），快照模式同理由 `buildSnapshotTree()` 处理——不是「先建好再 CSS 隐藏」。白名单是 `TREE_MD_EXT = ['md','markdown','mdx']`。**目录不再「一律保留」**：完整模式靠 `hasMarkdownDeep()` 逐个子目录探（见上段），快照模式在建完树后自下而上跑一遍 `prune()`，两边都做到「**整棵子树没有 Markdown ⇒ 连文件夹都不显示**」。之所以不留空目录，是因为一个「点开才发现里面是空的」壳子比干脆不显示更让人困惑；同理也不再逐层报「已过滤 N 个非 Markdown 文件」，打开工作区时只提示一句「仅显示 Markdown 文档」。
+
+**切换文档 = 换 `editor.value` + 调一次 `renderMarkdown()`**：换完把两个滚动容器显式拉回顶部并 `suppressSync()`，再 `saveContent()` 沿用单文档那套存档（刷新后仍停在这篇）。
+
+**编码判据（这也是 F5-b 关闭写回通道的依据，先在这里定下来）**：`decodeBytes()` 按「UTF-8 BOM → UTF-16 BOM → 严格 UTF-8（`TextDecoder('utf-8', { fatal: true })`）→ 失败即判非 UTF-8，回退 `TextDecoder('gbk')`」的顺序解码。BOM 会被剥掉，与 `FileReader.readAsText` 的既有行为一致；非 UTF-8 / UTF-16 只读预览并明确提示。
+
+**UI 复用**：抽屉刻意带上 `.outline-panel` 类——浮层骨架、`.show` 切换、**打印时隐藏**三件事都由那一套既有规则承担，`.file-tree-panel` 只把它从「右侧居中浮层」改成「左侧通栏抽屉」（毛玻璃 + 宽度拖拽，宽度记在 `mdtu-tree-width`）。文件行会占住折叠箭头那一列（空槽），否则同级目录与文件的图标 / 文字会左右错开。
+
+**抽屉头部不再单占一行标题。** 早先的版本是 `.outline-header`「文件树…」+ 下面一行工作区名，两行都占地方，字号还和树内容不一致。现在头部只有一个 `.tree-head`：左边 `.tree-root`（工作区名，14px / 600 粗）+ `.tree-mode`（快照模式标签），右边 `.tree-head-actions` 里四个 28×28 的 `.tree-btn`（图标 16×16：全部展开 / 全部收起 / 换文件夹 / **收起**）。最后一个刻意**不用 `×`**，而是「面板 + 左向箭头」——`×` 在这个位置会被读成「关闭 / 删除」，可它做的只是把抽屉折回边缘，不是关掉工作区。**全树字号统一 14px**：`.tree-head` / `.tree-root` / `.tree-mode` / `.tree-row` / `.tree-note` / `.tree-empty` / `.tree-pick` 同一档，不再有大有小；树内图标同步放大（`ICON_CARET` 12 / `ICON_DIR` 15 / `ICON_FILE` 14），折叠箭头槽 14px、图标槽 16px、缩进步长 `depth * 15`——**字号、槽宽、步长是联动量，改一个要跟着改另外两个**，否则同级目录与文件的图标会重新错开。没有工作区时三个操作按钮 `hidden`（`.tree-btn[hidden]{display:none!important}`）。
+
+**抽屉的显示 / 隐藏有三条路，各司其职。** ① 顶栏「打开 → 文件夹」那一项本身就是**开关**（展开时带 `.active` 激活态）；② 抽屉头部的「收起」按钮把它折回边缘；③ **抽屉收起后，留一枚悬浮球 `.tree-peek`**——`position: fixed`、`z-index: 790`，44×44 正圆、**实心 `--accent` 蓝底 + 白图标**、带投影（实心色 + 投影 = 一眼看出「这是个能点、能挪的东西」；浅底在白色正文上几乎化进背景，所以不用浅底）。按下时切 `.pressing` → `--accent-press`（`#f97316` 橙），给一个「按到了」的反馈；**这里不能用 `:active`**——`pointerdown` 里调了 `preventDefault()`，浏览器不再派发 `mousedown`，`:active` 未必成立，所以由 JS 显式加/摘 class，颜色才可控、可测。它用**指针事件**实现拖动：`pointerdown` 记起点、`pointermove` 写内联 `left/top`（`place()` 把坐标钳在视口内）、`pointerup` 落库；**位移小于 `PEEK_DRAG_SLOP`（4px）才算一次点击**，只有点击才展开抽屉——否则每次把球挪开都会顺手把文件树弹出来。位移一旦过阈值就摘掉 `.pressing`，于是**「点击 = 橙、拖动 = 蓝」在颜色上也能分辨**。位置存 `mdtu-tree-peek-pos`，`resize` 时重新钳制一次，免得窗口变小后球被留在视口外。第 ③ 条只在「**已经打开过工作区 + 抽屉处于收起**」时露出——还没选过目录时那个位置就空着（入口在顶栏菜单里，不需要第二个）。这条是为了把「隐藏之后怎么找回来」变成一个一眼可见、还能随手挪开的动作，而不是让人记得去菜单里翻。⚠️ 橙色只在**按下那一瞬**可见：球在 `pointerup` 后随抽屉展开一起隐藏，它不是一个残留状态。
+
+**「全部展开 / 全部收起」是两件不同的事。** 收起只是 `treeState.expanded.clear()`（清空展开集合，树的 `children` 留着，重新展开不必再读盘）。展开则要**逐个目录读盘**——懒加载的树一旦全展开，等于把整棵目录树读进内存，几千文件的目录会直接拖死 UI，所以 `TREE_EXPAND_MAX = 400` 封顶：到顶就停手并 `showToast('目录较多，只展开了前 400 个')`，而不是假装展完了。读盘过程中每 20 个目录重绘一次（每个都重绘会把整趟遍历拖慢一个量级），并用 `treeExpanding` 防止重复点击叠加。
+
+**打开成功不弹 Toast。** 正文已经换掉了，再盖一层浮层只是碍事——这条同时适用于单文件打开与树里切换文档。**只有一种例外**：非 UTF-8（GBK 回退）/ UTF-16 解码时必须提示，因为那时眼前的内容不是原文件字节的忠实还原，而且只读。
 
 ---
 
@@ -470,9 +561,11 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 | `mdtu-watermark` | 水印配置（JSON） |
 | `mdtu-fs-width` | 全屏页宽 |
 | `mdtu-device` | 预览设备档（`pc` / `ipad` / `app`） |
+| `mdtu-tree-width` | 文件树抽屉宽度（180–640px） |
+| `mdtu-tree-peek-pos` | 收起后悬浮球的位置（JSON `{ x, y }`，视口内钳制） |
+| `mdtu-frontmatter` | 元数据展示方式（`panel` / `codeBlock` / `hide`，旧值 `table` 读取时自动迁移） |
 
 > 早先还有一个 `mdtu-platform`（展示端）。平台维度并入设备档后，`init()` 会主动把它从 localStorage 里 `removeItem` 清掉。
-| `mdtu-frontmatter` | 元数据展示方式（`panel` / `codeBlock` / `hide`，旧值 `table` 读取时自动迁移） |
 
 ---
 
@@ -480,7 +573,7 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 
 | # | 限制 | 说明 |
 |---|------|------|
-| 1 | 导出 PDF / Word 都不是「原生格式」 | 导出 PDF 需在打印对话框里选「另存为 PDF」（方案 A，换来零依赖与矢量输出，不是一键直出）；导出 Word 是 `application/msword` 的 `.doc` **HTML 套壳**而非真 `.docx`，部分客户端会弹格式兼容提示，且不带水印。导出 **HTML 是完全自包含**的（样式全内联、断网可打开） |
+| 1 | 导出 PDF 的文字不可选中 | 「导出 PDF」确实一键下载（`html2canvas` + `jsPDF`），但内容是**图片**——文字不可选中、不可检索，体积也比矢量版大。要可检索的 PDF 请改用**「打印」**（矢量、文字可选）并在打印对话框里选「另存为 PDF」。导出 Word 是 `application/msword` 的 `.doc` **HTML 套壳**而非真 `.docx`，部分客户端会弹格式兼容提示，且不带水印。导出 **HTML 是完全自包含**的（样式全内联、断网可打开） |
 | 2 | 「打开」只读 | 读取后编辑不写回磁盘 |
 | 3 | URL 采集依赖代理 | 走 `api.allorigins.win` CORS 转发，不稳定且可能抓取不全 |
 | 4 | 离线不可用 | 依赖全走 CDN，无网络渲染链路瘫痪 |
@@ -490,6 +583,7 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 | 8 | 复制主题样式有剥离风险 | 微信会过滤 `<style>` 标签，需内联 style 才能根治（见 F3）。元数据面板已改用内联样式，不受此影响 |
 | 9 | 元数据面板的复制效果待人工确认 | 面板与标签全部走内联样式，但公众号编辑器的实际保留情况只能在真实后台验证（见 ROADMAP 的 F4 验收标准 8） |
 | 10 | `breaks: true` 会把硬换行当换行 | 与 GFM 默认语义不同：英文段落若按 80 列硬换行，渲染时会按折行位置断行。这是为公众号中文写作场景做的取舍（见第 8 节），需要时改 `js/app.js:307` 一处即可切回 |
+| 11 | 超长文档的「导出 PDF」会主动拒绝 | `html2canvas` 要一次性光栅化整篇内容，受浏览器画布面积上限约束。`scale` 会依次降 2 → 1.5 → 1 让步，仍放不下时**明确提示改走「打印」**，不会交出被截断的 PDF |
 
 ---
 
@@ -499,11 +593,11 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 
 | 编号 | 模块 | 优先级 | 状态 | 说明 |
 |------|------|--------|------|------|
-| **F1** | 导出能力 | P0 | ✅ 已完成 | 复制 MD / 导出 PDF / Word / HTML，全部浏览器下载（见 7.8） |
+| **F1** | 导出能力 | P0 | ✅ 已完成 | 复制 MD / 导出 HTML / 导出 PDF（下载）/ 导出 Word / 打印，一站到位（见 7.8） |
 | **F2** | 界面与交互优化 | P1 | ⬜ 待规划 | 字体排版 / 交互效率 / 提示反馈 / 无障碍 / 响应式 |
 | **F3** | 主题模板体系 | P1 | 🟦 部分落地 | 已精简为 2 套自研主题（GitHub / 晴空蓝）+ 旧值收敛；外部主题生态调研见 [F3-THEME-RESEARCH.md](./F3-THEME-RESEARCH.md)，结论是「先把 2 套做扎实」、推荐自研 token→CSS 生成器（见 7.9 相关的平行维护问题） |
 | **F4** | 文档元数据解析与展示 | P1 | ✅ 已完成 | YAML Front Matter → 顶部「属性」面板（类型图标 + 标签样式）+ 三档展示（见 7.7） |
-| **F5** | 文件夹模式 | P1 | ⬜ 待规划 | 打开文件夹 + 文件树 + 写回磁盘；原生 File System Access API、零依赖；方案见 [F5-FOLDER-MODE.md](./F5-FOLDER-MODE.md) |
+| **F5** | 文件夹模式 | P1 | 🟦 部分落地 | **F5-a（只读）已完成**：打开文件夹 + 文件树 + 切换文档 + 三层能力降级（见 7.10）；写回 / 文件管理 / 冲突检测未做，方案见 [F5-FOLDER-MODE.md](./F5-FOLDER-MODE.md) |
 | **F6** | 预览模式（设备档） | P1 | ✅ 已完成 | 设备档（PC / iPad / APP）平铺档位，每档内建对应阅读场景（Web / Web + 平板适配 / 公众号），只影响预览、不进产物（见 7.9） |
 
 **共同前置约束**：项目是「零构建 + CDN」纯静态三文件，新增依赖要么走 CDN `<script>`，要么引入构建步骤并改变「双击即跑」的性质。
@@ -527,3 +621,4 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 - **导出相关的三个连带点**：① 主题色有 4 处平行（`style.css` 的 `.theme-*`、`getThemeStyles()`、`FM_PALETTE`、导出外壳 `EXPORT_PAGE_CSS` / `WORD_COMPAT_CSS`）；② 把 CDN CSS 文本内联进导出文件前必须绝对化其中的 `url()`，否则 KaTeX 的 `@font-face` 全部 404；③ 块级公式能否渲染取决于 `renderMath()` 开头的 `unfoldDisplayMath()` 有没有把 `breaks: true` 造出来的 `<br>` 合回文本节点，动这块时别漏。
 - **预览容器的 class 只有一个出口**：`preview.className` 一律经 `syncPreviewClass()`（app.js:854）拼装（主题 + 方格 + 设备档三维）。全文只允许一处写 `preview.className = [`，别处整串覆盖会静默冲掉其余维度；`device-*` 是观察工具，**进产物前必须在两条克隆路径上剥掉**（`stripPreviewModeClasses()`，app.js:931）。
 - **设备档的选择器要写两级**：`.markdown-body.device-app` 而非 `.device-app`——主题段 `.theme-*` 同样声明 `font-size`，且排在设备档之后，单级选择器会被顶掉。详见 7.9。
+- **Mermaid 图内度量是第 5 处平行**：`style.css` 的 `.markdown-body .mermaid-rendered svg *`、`MERMAID_LOCK_CSS`（app.js:1082，导出 HTML / 复制公众号 / 导出 Word 三处产物共用）必须保持同一组取值（字体 / 字号 16px / 行高 `normal` / 字距 `normal` / `margin:0`）。**放大浮层里的克隆图是第 6 处**（`.mermaid-zoom-figure svg *`，同样一份）——浮层不在 `.markdown-body` 内，继承不到网页那份。mermaid 按字体原生的 `normal` 行高把节点框与 `foreignObject` 量好再画字，超出即被裁；主题与设备档的行高（1.6–1.75）、字距（APP 档 +.5px）、字体一旦继承进 SVG，节点文字就会被切掉一截。⚠️ 钉**固定倍数**（如 1.5）会只对**纯拉丁文**标签露馅——它每行比量算值高 5px，中文恰好相等所以看不出来。改了 `mermaid.initialize()` 的 `fontFamily` / `fontSize` 要同步这几处。ex-test 静态段锁 11 条（并逐字比对 `style.css` 与 `MERMAID_LOCK_CSS`）。

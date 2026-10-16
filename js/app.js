@@ -953,7 +953,7 @@ $$
     // Get computed styles from the theme
     const themeStyles = getThemeStyles(state.theme);
     const styleEl = document.createElement('style');
-    styleEl.textContent = themeStyles;
+    styleEl.textContent = themeStyles + '\n' + MERMAID_LOCK_CSS;
     wrapper.insertBefore(styleEl, wrapper.firstChild);
 
     // Try to copy as rich text
@@ -1071,6 +1071,17 @@ code { font-family: Consolas, "Courier New", monospace; }
 blockquote { margin: 0 0 8pt; padding: 4pt 10pt; }
 ul, ol { margin: 0 0 8pt; padding-left: 22pt; }
 img { max-width: 100%; }`;
+
+  // Mermaid 图内排版度量回钉（与 css/style.css 同名规则平行维护）。
+  // 起因：mermaid 用**字体原生的 normal 行高**（拉丁 ≈19px/行、中文 ≈24px/行 @16px）算好节点框，
+  // 再把文字塞进同样大小的 foreignObject，**超出即被裁**；而主题样式里
+  // `body, div { font-family: …; line-height: … }` 会命中 foreignObject 里的标签 div 把字撑大。
+  // ⚠️ 钉固定倍数（如 1.5）同样错：拉丁文每行 24 > 框 19，两行裁 10px（中文恰好相等，看不出）。
+  // 产物里不带 style.css，所以这条必须跟着每个产物走。取值 = mermaid 的量算条件
+  // （16px / 字体原生 normal 行高 / 无字距）；改了 mermaid.initialize 的 fontFamily、fontSize 要同步。
+  const MERMAID_LOCK_CSS = '.mermaid-rendered svg * { ' +
+    'font-family: "trebuchet ms", verdana, arial, sans-serif; font-size: 16px; ' +
+    'line-height: normal; letter-spacing: normal; margin: 0; }';
 
   // 文档标题：正文里第一个 H1 → 元数据的 title → 空
   function docTitleText() {
@@ -1190,6 +1201,7 @@ img { max-width: 100%; }`;
       exportFrontMatterComment() +
       '<style>\n' + EXPORT_PAGE_CSS + '\n</style>\n' +
       '<style>\n' + getThemeStyles(state.theme) + '\n</style>\n' +
+      '<style>\n' + MERMAID_LOCK_CSS + '\n</style>\n' +
       (inlined.length ? '<style>\n' + inlined.join('\n') + '\n</style>\n' : '') +
       (linkTags ? linkTags + '\n' : '') +
       '<style>\n' + exportWatermarkCss() + '\n</style>\n' +
@@ -1253,7 +1265,7 @@ img { max-width: 100%; }`;
       '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View>' +
       '<w:Zoom>100</w:Zoom><w:DoNotOptimizeForBrowser/></w:WordDocument></xml><![endif]-->\n' +
       '<style>\n@page WordSection1 { size: A4; margin: 2cm; }\ndiv.WordSection1 { page: WordSection1; }\n' +
-      getThemeStyles(state.theme) + '\n' + WORD_COMPAT_CSS + '\n</style>\n' +
+      getThemeStyles(state.theme) + '\n' + WORD_COMPAT_CSS + '\n' + MERMAID_LOCK_CSS + '\n</style>\n' +
       '</head>\n<body>\n<div class="WordSection1">\n' +
       clone.outerHTML + '\n</div>\n</body>\n</html>\n';
   }
@@ -1307,15 +1319,166 @@ img { max-width: 100%; }`;
     return ok;
   }
 
-  function exportPdf() {
-    showToast('在打印对话框里选择「目标 → 另存为 PDF」');
+  // 「打印」——交给浏览器自己的打印管线：矢量、文字可选中、页边距与纸张由用户在对话框里定，
+  // 也可以在那里「另存为 PDF」。这条路不生成任何文件、不碰磁盘。
+  function printDocument() {
+    showToast('已唤起打印对话框（可打印，也可另存为 PDF）');
     // 等一帧，确保刚触发的重渲染（如 Mermaid 异步出图）已经落到 DOM 上
     setTimeout(() => window.print(), 60);
   }
 
+  // ===== 导出 PDF（下载）=====
+  // 与「打印」是两件事，别混：
+  //   · 打印     → window.print()：浏览器打印管线（矢量 / 文字可选中）
+  //   · 导出 PDF → 把预览渲染成图片、按 A4 切片拼成 .pdf 文件直接下载
+  // 代价是文字不可选中（图片版），换来的是「点一下就拿到文件」。
+  // 两个库都**按需加载**：只有真的点这一项才会去拉，首屏不为一个低频功能多背几百 KB。
+  const PDF_LIBS = {
+    html2canvas: 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js',
+    jspdf: 'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js',
+  };
+
+  function loadScriptOnce(src) {
+    return new Promise(function (resolve, reject) {
+      const known = document.querySelector('script[data-lazy-src="' + src + '"]');
+      if (known) {
+        if (known.dataset.loaded === '1') return resolve();
+        known.addEventListener('load', function () { resolve(); });
+        known.addEventListener('error', function () { reject(new Error('无法加载 ' + src)); });
+        return;
+      }
+      const s = document.createElement('script');
+      s.src = src;
+      s.async = true;
+      s.dataset.lazySrc = src;
+      s.addEventListener('load', function () { s.dataset.loaded = '1'; resolve(); });
+      s.addEventListener('error', function () { reject(new Error('无法加载 ' + src)); });
+      document.head.appendChild(s);
+    });
+  }
+
+  function ensureLib(globalName, src) {
+    if (window[globalName]) return Promise.resolve();
+    return loadScriptOnce(src).then(function () {
+      if (!window[globalName]) throw new Error(globalName + ' 加载后仍不可用');
+    });
+  }
+
+  // A4 纵向尺寸（pt）与页边距；渲染宽度里 .markdown-body 自带 40px 内边距，故 900 - 80 = 820 正文宽
+  const PDF_MARGIN_PT = 24;
+  const PDF_USABLE_W = 595.28 - PDF_MARGIN_PT * 2;
+  const PDF_USABLE_H = 841.89 - PDF_MARGIN_PT * 2;
+  const PDF_STAGE_W = 900;
+
+  // 从目标位置往回找一条「整行都接近白色」的像素行，在那里切页 ——
+  // 否则正文会在页边界上被切成半行字。找不到就退回原位置，总比切在字腰上强。
+  function findBlankCut(canvas, target) {
+    const ctx = canvas.getContext('2d');
+    const limit = Math.max(0, target - 120);
+    for (let y = Math.min(target, canvas.height - 1); y > limit; y--) {
+      let data;
+      try { data = ctx.getImageData(0, y, canvas.width, 1).data; } catch (e) { return target; }
+      let blank = true;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] < 246 || data[i + 1] < 246 || data[i + 2] < 246) { blank = false; break; }
+      }
+      if (blank) return y;
+    }
+    return target;
+  }
+
+  async function exportPdfFile() {
+    showToast('正在生成 PDF…');
+    await ensureLib('html2canvas', PDF_LIBS.html2canvas);
+    await ensureLib('jspdf', PDF_LIBS.jspdf);
+    const JsPDF = window.jspdf && window.jspdf.jsPDF;
+    if (!JsPDF) throw new Error('jsPDF 不可用');
+
+    // 与「导出 HTML」同一条克隆路径：剥掉 device-* / pnid / 方格背景 / 内联页宽
+    const clone = clonePreviewForExport();
+    // 水印是 #preview 上的一条 inline 背景，上面那一步会连 style 一起剥掉，这里按当前状态补回
+    if (preview.style.backgroundImage) {
+      clone.style.backgroundImage = preview.style.backgroundImage;
+      clone.style.backgroundRepeat = preview.style.backgroundRepeat || 'repeat';
+    }
+    // 固定成文档宽度（900，正文 820）：PDF 不该跟着当前预览档位变形
+    clone.style.cssText +=
+      'width:' + PDF_STAGE_W + 'px;max-width:none;min-height:0;padding:40px;' +
+      'margin:0;border-radius:0;box-shadow:none;background-color:#ffffff;';
+
+    // 离屏舞台：html2canvas 要量真实布局，所以移出视口而不是 display:none
+    const stage = document.createElement('div');
+    stage.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + PDF_STAGE_W + 'px;background:#ffffff;';
+    stage.appendChild(clone);
+    document.body.appendChild(stage);
+
+    try {
+      const contentW = PDF_STAGE_W - 80;                 // 正文实际宽度（px）
+      const pxPerPt = contentW / PDF_USABLE_W;            // px → pt
+      const pageCanvasH = Math.round(PDF_USABLE_H * pxPerPt);
+
+      // 文档过高会撞上浏览器画布尺寸上限。先按高度降采样，实在放不下就明确拒绝，
+      // 让用户走「打印 → 另存为 PDF」—— 绝不静默给一份半截文档。
+      const totalH = clone.getBoundingClientRect().height;
+      const scale = totalH * 2 <= 32000 ? 2 : (totalH * 1.5 <= 32000 ? 1.5 : 1);
+      if (totalH * scale > 32000) {
+        throw new Error('文档过长，超出浏览器画布上限，请改用「打印 → 另存为 PDF」');
+      }
+
+      const canvas = await window.html2canvas(clone, {
+        scale: scale,
+        backgroundColor: '#ffffff',
+        logging: false,
+        useCORS: true,
+        allowTaint: false,
+        windowWidth: PDF_STAGE_W,
+      });
+
+      const pdf = new JsPDF({ unit: 'pt', format: 'a4', orientation: 'portrait' });
+      let offset = 0;
+      let pageIndex = 0;
+
+      while (offset < canvas.height) {
+        let sliceH = Math.min(pageCanvasH, canvas.height - offset);
+        const cut = findBlankCut(canvas, offset + sliceH);
+        if (cut > offset + 40) sliceH = cut - offset;
+
+        const page = document.createElement('canvas');
+        page.width = canvas.width;
+        page.height = sliceH;
+        // alpha:false —— 页面本来就是白底，去掉 alpha 通道能显著减小编码体积
+        const ctx = page.getContext('2d', { alpha: false });
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, page.width, page.height);
+        ctx.drawImage(canvas, 0, offset, canvas.width, sliceH, 0, 0, canvas.width, sliceH);
+
+        let dataUrl;
+        try {
+          // JPEG 而不是 PNG：PNG 一页要 600KB+（10 页 ≈ 68MB，实测），
+          // 而 0.92 的 JPEG 在这个倍率下文字边缘已经看不出区别，体积却小一个数量级
+          dataUrl = page.toDataURL('image/jpeg', 0.92);
+        } catch (e) {
+          // 画布被跨域图片污染时 toDataURL 会抛 SecurityError —— 说清原因，别报一句英文
+          throw new Error('文档里的跨域图片污染了画布，无法生成 PDF，请改用「打印 → 另存为 PDF」');
+        }
+
+        if (pageIndex) pdf.addPage();
+        pdf.addImage(dataUrl, 'JPEG', PDF_MARGIN_PT, PDF_MARGIN_PT,
+          PDF_USABLE_W, PDF_USABLE_H * (sliceH / pageCanvasH));
+        offset += sliceH;
+        pageIndex++;
+      }
+
+      downloadBlob(pdf.output('blob'), getDocBaseName() + '.pdf');
+      showToast('已导出 PDF（图片版，文字不可选中）', 'success');
+    } finally {
+      if (stage.parentNode) stage.parentNode.removeChild(stage);
+    }
+  }
+
   async function runExport(kind) {
     if (kind === 'md') return exportCopyMarkdown();
-    if (kind === 'pdf') return exportPdf();
+    if (kind === 'print') return printDocument();
     try {
       if (kind === 'html') {
         const html = await buildStandaloneHtml();
@@ -1324,6 +1487,8 @@ img { max-width: 100%; }`;
       } else if (kind === 'word') {
         downloadBlob(buildWordHtml(), getDocBaseName() + '.doc', 'application/msword');
         showToast('已导出 Word（.doc，HTML 套壳）', 'success');
+      } else if (kind === 'pdf') {
+        await exportPdfFile();
       }
     } catch (err) {
       showToast('导出失败：' + ((err && err.message) || err), 'error');
@@ -1486,8 +1651,36 @@ img { max-width: 100%; }`;
     if (e.key === 'Escape') setExportMenu(false);
   });
 
+  // ===== 「打开」下拉（文件 / 文件夹）=====
+  // 与导出下拉共用 .export-wrap / .export-menu 一套骨架与样式，只是菜单里换成两个入口。
+  const openWrap = $('#openWrap');
+  const openMenu = $('#openMenu');
+  const btnOpen = $('#btnOpen');
+
+  function setOpenMenu(open) {
+    openMenu.classList.toggle('show', open);
+    openWrap.classList.toggle('open', open);
+    btnOpen.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  btnOpen.addEventListener('click', (e) => {
+    e.stopPropagation(); // 否则会立刻被下面的「点外部关闭」收掉
+    setOpenMenu(!openMenu.classList.contains('show'));
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!openWrap.contains(e.target)) setOpenMenu(false);
+  });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') setOpenMenu(false);
+  });
+
   // Open local file
-  $('#btnOpenFile').addEventListener('click', () => $('#fileInput').click());
+  $('#btnOpenFile').addEventListener('click', () => {
+    setOpenMenu(false);
+    $('#fileInput').click();
+  });
   $('#fileInput').addEventListener('change', (e) => {
     const file = e.target.files && e.target.files[0];
     if (!file) return;
@@ -1501,7 +1694,7 @@ img { max-width: 100%; }`;
       renderMarkdown();
       saveContent();
       editor.scrollTop = 0;
-      showToast(`已打开：${file.name}`);
+      // 打开成功不弹提示 —— 正文已经换掉了，再盖一层浮层只是碍事
     };
     reader.onerror = () => showToast('文件读取失败');
     reader.readAsText(file, 'utf-8');
@@ -1585,14 +1778,27 @@ img { max-width: 100%; }`;
   });
 
   // Fullscreen
+  // 全屏是「安静读」的场景，进全屏等于锁定当前档位：
+  //   1) 设备档整组藏起来（不让人在全屏里来回切），正文仍按进入时那一档的版心渲染
+  //      —— `.device-*` class 一直挂在 #preview 上，什么都不用做就是对的；
+  //   2) 页宽组只对 PC 档有意义。iPad / APP 的版心是设备尺寸，再叠一层「页宽」
+  //      只会互相打架（页宽是 inline max-width，会直接压掉 --dev-max），所以非 PC 档不给。
   function enterFullscreen() {
     const panel = $('#previewPanel');
     panel.classList.add('fullscreen');
     $('#btnFullscreen').style.display = 'none';
     $('#btnPreviewScroll').style.display = 'none';
     $('#btnExitFs').style.display = '';
-    $('#fsWidthGroup').style.display = '';
-    applyFsWidth(fsWidth);
+    $('#previewModeGroup').style.display = 'none';
+    const isPc = state.device === 'pc';
+    $('#fsWidthGroup').style.display = isPc ? '' : 'none';
+    if (isPc) {
+      applyFsWidth(fsWidth);
+    } else {
+      // 把版心交还给设备档（--dev-max），别让上一次的页宽留在这里
+      preview.style.maxWidth = '';
+      preview.classList.remove('page-mode');
+    }
   }
   function exitFullscreen() {
     const panel = $('#previewPanel');
@@ -1600,6 +1806,7 @@ img { max-width: 100%; }`;
     $('#btnFullscreen').style.display = '';
     $('#btnPreviewScroll').style.display = '';
     $('#btnExitFs').style.display = 'none';
+    $('#previewModeGroup').style.display = '';
     $('#fsWidthGroup').style.display = 'none';
     preview.style.maxWidth = '';
     preview.classList.remove('page-mode');
@@ -2167,6 +2374,655 @@ img { max-width: 100%; }`;
     if (e.key === 'Enter' && e.target.id === 'wmText') wmApply();
   });
 
+  // ===== F5：文件夹模式（只读）=====
+  // 目标：选定一个本地目录 → 枚举成文件树 → 点节点切换文档。
+  // 本期是 **F5-a**，全程不写盘：不保存、不新建、不重命名、不删除，磁盘只读。
+  //
+  // 三层渐进增强（见 F5-FOLDER-MODE.md §4.3）：
+  //   ① 'pick'     File System Access API：能拿到目录句柄（Edge / Chrome；file:// 也是安全上下文）
+  //   ② 'snapshot' <input webkitdirectory>：只有只读的文件快照，没有写回通道，作为更低一层保障
+  //   ③ 'none'     两者都没有（Firefox / Safari）：入口整体不渲染，退回既有单文档模式
+  // 探测只判「函数在不在」——该 API 由 [SecureContext] 门控，非安全上下文里它连函数都不存在，
+  // 所以这一行同时蕴含了「当前是否安全上下文」。
+  const FOLDER_CAP = (function () {
+    if (typeof window.showDirectoryPicker === 'function') return 'pick';
+    try {
+      if ('webkitdirectory' in document.createElement('input')) return 'snapshot';
+    } catch (e) { /* 老引擎忽略 */ }
+    return 'none';
+  })();
+
+  // 树上只保留 Markdown 文档，其余（图片 / 配置 / .txt / 任何二进制）一律过滤掉 ——
+  // 一个真实的写作目录里，绝大多数文件都不是给人读的，全铺出来只会把文档淹掉。
+  // 被过滤掉的文件数会记在节点上，并在树里如实告知（见 appendRows），
+  // 否则「文件明明在磁盘上，树里却没有」会被当成丢文件。
+  const TREE_MD_EXT = ['md', 'markdown', 'mdx'];
+  // 命中即整棵剪掉 —— 不忽略的话，树会被依赖目录与产物淹没
+  const TREE_IGNORE = ['node_modules', '.git', 'dist', 'build', 'out', '.next', '.venv', '__pycache__', '.DS_Store'];
+  const TREE_W_KEY = 'mdtu-tree-width';
+  const TREE_PEEK_KEY = 'mdtu-tree-peek-pos';
+
+  // 「这棵子树里到底还有没有 Markdown」的探测预算。
+  // 没有 Markdown 的目录整条不进树，但探测是要读盘的：累计扫过的条目数一旦超过这个数，
+  // 就不再深挖、一律判定为「有」——宁可多留一个目录，也不因为预算用尽就错杀有文档的子树。
+  const TREE_PROBE_MAX = 1500;
+
+  const ICON_CARET = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><polyline points="9 6 15 12 9 18"/></svg>';
+  const ICON_DIR = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>';
+  const ICON_FILE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><polyline points="14 3 14 8 19 8"/></svg>';
+
+  const treePanel = $('#fileTreePanel');
+  const treeBody = $('#fileTreeBody');
+  const treeRootEl = $('#treeRoot');
+  const treeModeEl = $('#treeMode');
+  const btnOpenFolder = $('#btnOpenFolder');
+  const folderInput = $('#folderInput');
+  const treeResizer = $('#treeResizer');
+  const treePeek = $('#treePeek');
+
+  // 树节点 = { name, kind:'dir'|'file', path, ref, children, loaded, loading, error }
+  // ref 在完整模式下是 FileSystemHandle，在只读快照模式下是 File 对象。
+  // children === null 表示「还没枚举过」，空数组才是「真的是空目录」——两者不能混。
+  // 非 Markdown 文件在枚举时就被丢掉；**整棵子树都没有 Markdown 的目录同样不进树**
+  // （见 hasMarkdownDeep），所以树上不会出现「点开才发现里面是空的」这种壳子。
+  const treeState = {
+    cap: FOLDER_CAP,
+    mode: FOLDER_CAP === 'pick' ? 'pick' : (FOLDER_CAP === 'snapshot' ? 'snapshot' : ''),
+    root: null,
+    currentPath: '',
+    expanded: new Set(),
+    visible: false,
+  };
+
+  function treeExt(name) {
+    const i = name.lastIndexOf('.');
+    return i > 0 ? name.slice(i + 1).toLowerCase() : '';
+  }
+  function isMdName(name) { return TREE_MD_EXT.indexOf(treeExt(name)) !== -1; }
+  function shouldIgnore(name) { return TREE_IGNORE.indexOf(name) !== -1; }
+  function joinPath(base, name) { return base ? base + '/' + name : name; }
+
+  function makeNode(name, kind, path, ref) {
+    return {
+      name: name, kind: kind, path: path, ref: ref || null,
+      children: null, loaded: false, loading: false, error: '',
+    };
+  }
+
+  // 目录在前、文件在后；同组内按中文 + 数字感知排序 ——
+  // numeric 必需，否则「第10章」会排在「第2章」前面
+  function sortTreeNodes(nodes) {
+    nodes.sort(function (a, b) {
+      if (a.kind !== b.kind) return a.kind === 'dir' ? -1 : 1;
+      return a.name.localeCompare(b.name, 'zh', { numeric: true });
+    });
+  }
+
+  // 「这棵子树里还有没有 Markdown」——没有就整条不进树。
+  // 早退：见着第一个 .md 立刻返回 true，所以常规文档目录只读几个条目。
+  // budget 是整次 loadChildren 共用的计数器（跨子目录累计），用尽后一律判 true——
+  // 宁可多留一个目录，也不因为预算用完就错杀一整棵有文档的子树。
+  async function hasMarkdownDeep(dirHandle, budget) {
+    let entries;
+    try { entries = dirHandle.values(); } catch (err) { return true; }
+    for await (const h of entries) {
+      if (shouldIgnore(h.name)) continue;
+      if (budget.n++ >= TREE_PROBE_MAX) return true;
+      if (h.kind === 'directory') {
+        if (await hasMarkdownDeep(h, budget)) return true;
+      } else if (isMdName(h.name)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // 只枚举一层，子目录等用户点开时才读（懒加载）——
+  // 一次把整棵树铺开，几千文件的目录会直接卡死 UI。
+  // 每个子目录先探一下「里面还有没有 Markdown」，没有就不放进 out。
+  // 结果直接写进 node，调用方不用再赋值 —— 三个调用点（点开目录 / 全部展开 / 选目录）
+  // 都要同时维护 children / loaded / error 三件事，散在外面迟早漏一个。
+  async function loadChildren(node) {
+    const out = [];
+    const budget = { n: 0 };
+    for await (const h of node.ref.values()) {
+      if (shouldIgnore(h.name)) continue;
+      if (h.kind !== 'directory') {
+        if (isMdName(h.name)) out.push(makeNode(h.name, 'file', joinPath(node.path, h.name), h));
+        continue;
+      }
+      if (budget.n >= TREE_PROBE_MAX || await hasMarkdownDeep(h, budget)) {
+        out.push(makeNode(h.name, 'dir', joinPath(node.path, h.name), h));
+      }
+    }
+    sortTreeNodes(out);
+    node.children = out;
+    node.loaded = true;
+    node.error = '';
+  }
+
+  // 只读降级：<input webkitdirectory> 给的是一份扁平文件列表（带 webkitRelativePath），
+  // 拿不到目录句柄，这里按路径把树补出来，File 对象挂在叶子上。
+  // 过滤规则与完整模式一致：非 Markdown 文件不进树，整棵没有 Markdown 的目录也不进。
+  function buildSnapshotTree(files) {
+    const rootName = ((files[0].webkitRelativePath || '').split('/')[0]) || '工作区';
+    const root = makeNode(rootName, 'dir', '', null);
+    root.children = [];
+    root.loaded = true;
+
+    files.forEach(function (file) {
+      const parts = (file.webkitRelativePath || file.name).split('/');
+      if (parts[0] === rootName) parts.shift();
+      if (!parts.length || parts.some(shouldIgnore)) return;
+
+      let dir = root;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const p = joinPath(dir.path, parts[i]);
+        let next = null;
+        for (let j = 0; j < dir.children.length; j++) {
+          if (dir.children[j].name === parts[i]) { next = dir.children[j]; break; }
+        }
+        if (!next) {
+          next = makeNode(parts[i], 'dir', p, null);
+          next.children = [];
+          next.loaded = true;
+          dir.children.push(next);
+        }
+        dir = next;
+      }
+      const leaf = parts[parts.length - 1];
+      if (!isMdName(leaf)) return;
+      dir.children.push(makeNode(leaf, 'file', joinPath(dir.path, leaf), file));
+    });
+
+    // 快照模式手里有全量文件列表，所以能做「一次到底」的剪枝：自下而上把空目录摘掉再排序。
+    // pick 模式做不到这一步（子目录内容要读了才知道），只能靠 hasMarkdownDeep 探。
+    (function prune(node) {
+      node.children = node.children.filter(function (c) {
+        if (c.kind !== 'dir') return true;
+        prune(c);
+        return c.children.length > 0;
+      });
+      sortTreeNodes(node.children);
+    })(root);
+    return root;
+  }
+
+  // ----- 渲染 -----
+
+  function noteRow(text, depth, isError) {
+    const el = document.createElement('div');
+    el.className = 'tree-note' + (isError ? ' tree-error' : '');
+    el.style.paddingLeft = (10 + depth * 15) + 'px';
+    el.textContent = text;
+    return el;
+  }
+
+  function buildRow(node, depth) {
+    const row = document.createElement('div');
+    row.className = 'tree-row';
+    row.dataset.path = node.path;
+    row.dataset.kind = node.kind;
+    row.style.paddingLeft = (10 + depth * 15) + 'px';
+
+    // 文件行也占住折叠箭头那一列（空槽），否则同级的图标与文字会左右错开
+    const lead = document.createElement('span');
+    if (node.kind === 'dir') {
+      row.classList.add('tree-dir');
+      if (treeState.expanded.has(node.path)) row.classList.add('open');
+      lead.className = 'tree-caret';
+      lead.innerHTML = ICON_CARET;
+    } else {
+      row.classList.add('tree-file');
+      if (node.path === treeState.currentPath) row.classList.add('active');
+      lead.className = 'tree-caret tree-caret-empty';
+    }
+    row.appendChild(lead);
+
+    const ico = document.createElement('span');
+    ico.className = 'tree-ico';
+    ico.innerHTML = node.kind === 'dir' ? ICON_DIR : ICON_FILE;
+    row.appendChild(ico);
+
+    const name = document.createElement('span');
+    name.className = 'tree-name';
+    name.textContent = node.name;
+    row.title = node.path || node.name;
+    row.appendChild(name);
+    return row;
+  }
+
+  // depth 是「这一层子项的缩进级别」。
+  function appendRows(node, depth, frag) {
+    const kids = node.children || [];
+    if (!kids.length) return;
+
+    kids.forEach(function (child) {
+      frag.appendChild(buildRow(child, depth));
+      if (child.kind !== 'dir' || !treeState.expanded.has(child.path)) return;
+
+      if (child.loading) { frag.appendChild(noteRow('加载中…', depth + 1)); return; }
+      if (child.error) { frag.appendChild(noteRow('读取失败：' + child.error, depth + 1, true)); return; }
+
+      if (child.children && child.children.length) { appendRows(child, depth + 1, frag); return; }
+      // 枚举时已经剪过一遍，走到这里只可能是「刚打开时还有、现在被清空了」——
+      // 留一行占位，不假装它里面有东西
+      frag.appendChild(noteRow('(空)', depth + 1));
+    });
+  }
+
+  function renderTree() {
+    const hasRoot = !!treeState.root;
+
+    // 头部这一行就是工作区名字；没有工作区时它空着，三个树操作一并藏起来（只留「收起」）
+    treeRootEl.textContent = hasRoot ? treeState.root.name : '';
+    treeRootEl.title = hasRoot ? treeState.root.name : '';
+    [$('#treeExpandAll'), $('#treeCollapseAll'), $('#treePickBtn')].forEach(function (b) {
+      b.hidden = !hasRoot;
+    });
+
+    treeBody.innerHTML = '';
+
+    if (!hasRoot) {
+      treeBody.innerHTML =
+        '<div class="tree-empty">' +
+        '<button type="button" class="btn-primary tree-pick" data-tree-pick="1">选择文件夹…</button>' +
+        '<p>打开后可以逐个浏览目录里的文档，点一下就切换。<br>只展示 Markdown 文档（' +
+        TREE_MD_EXT.map(function (e) { return '.' + e; }).join(' / ') +
+        '），其余文件不进树，没有文档的目录也不会出现。<br>本期为只读：不会改动磁盘上的任何文件。</p>' +
+        '</div>';
+      return;
+    }
+
+    if (treeState.root.error) {
+      treeBody.appendChild(noteRow('读取失败：' + treeState.root.error, 0, true));
+      return;
+    }
+
+    const frag = document.createDocumentFragment();
+    appendRows(treeState.root, 0, frag);
+    treeBody.appendChild(frag);
+
+    const active = treeBody.querySelector('.tree-row.active');
+    if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
+  }
+
+  function findNode(path) {
+    if (!treeState.root || !path) return null;
+    let found = null;
+    (function walk(node) {
+      if (found || !node.children) return;
+      for (let i = 0; i < node.children.length; i++) {
+        const c = node.children[i];
+        if (c.path === path) { found = c; return; }
+        if (c.children) walk(c);
+      }
+    })(treeState.root);
+    return found;
+  }
+
+  // ----- 行为 -----
+
+  function setTreePanel(show) {
+    treeState.visible = show;
+    treePanel.classList.toggle('show', show);
+    if (btnOpenFolder) btnOpenFolder.classList.toggle('active', show);
+    // 悬浮球只在「已经打开过工作区 + 抽屉处于收起」时露出来；
+    // 还没选过文件夹时不占地方（那会儿入口就在顶栏菜单里，不需要第二个）
+    if (treePeek) treePeek.hidden = !(!show && treeState.root);
+    if (show) renderTree();
+  }
+
+  // 「全部收起」= 把展开集合清空。树本身（children）留着，重新展开不用再读盘。
+  function collapseAll() {
+    treeState.expanded.clear();
+    renderTree();
+  }
+
+  // 「全部展开」= 递归把每个目录都读出来再摊开。
+  // 懒加载的树一旦全展开，等于把整棵目录树读进内存 —— 几千文件的目录会直接把 UI 拖死，
+  // 所以设一个目录数上限，到顶就停手并如实告知，而不是假装已经展完。
+  const TREE_EXPAND_MAX = 400;
+
+  let treeExpanding = false;
+
+  async function expandAll() {
+    if (!treeState.root || treeExpanding) return;
+    treeExpanding = true;
+    let count = 0;
+    let hitMax = false;
+
+    async function walk(node) {
+      if (hitMax || !node.children) return;
+      for (let i = 0; i < node.children.length; i++) {
+        const c = node.children[i];
+        if (c.kind !== 'dir') continue;
+        if (count >= TREE_EXPAND_MAX) { hitMax = true; return; }
+        treeState.expanded.add(c.path);
+        // 只读快照模式的树是一次性建好的（loaded=true），这里只需展开，不读盘
+        if (!c.loaded && c.ref) {
+          count++;
+          try {
+            await loadChildren(c);
+          } catch (err) {
+            c.error = (err && err.message) || String(err);
+            c.children = null;
+            continue;
+          }
+          // 每读一小批重绘一次，让用户看得见进度（每读一个都重绘会把整棵遍历拖慢一个量级）
+          if (count % 20 === 0) renderTree();
+        }
+        await walk(c);
+      }
+    }
+
+    await walk(treeState.root);
+    treeExpanding = false;
+    renderTree();
+    if (hitMax) showToast('目录较多，只展开了前 ' + TREE_EXPAND_MAX + ' 个');
+  }
+
+  async function toggleDir(node) {
+    if (treeState.expanded.has(node.path)) {
+      treeState.expanded.delete(node.path);
+      renderTree();
+      return;
+    }
+    treeState.expanded.add(node.path);
+
+    // 懒加载：只有完整模式下的目录才需要现读；快照模式的树已经一次性建好了
+    if (!node.loaded && node.ref) {
+      node.loading = true;
+      renderTree();
+      try {
+        await loadChildren(node);
+      } catch (err) {
+        // 单个子目录读不了（权限 / 被占用）只局部标红，不中断整棵树
+        node.error = (err && err.message) || String(err);
+        node.children = null;
+      }
+      node.loading = false;
+    }
+    renderTree();
+  }
+
+  // 解码顺序：BOM 优先 → 严格 UTF-8 → 失败即判「非 UTF-8」，按 GBK 只读预览。
+  // 「严格解码失败 = 非 UTF-8」这条判据是 F5-b 关闭写回通道的依据，先在这里定下来，
+  // 否则写回那天会把用户的原文件替换成乱码。
+  function tryDecodeStrict(label, bytes) {
+    try { return new TextDecoder(label, { fatal: true }).decode(bytes); } catch (e) { return null; }
+  }
+
+  function decodeBytes(bytes) {
+    if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+      return { text: tryDecodeStrict('utf-8', bytes.subarray(3)) || '', encoding: 'utf-8' };
+    }
+    if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
+      const t = tryDecodeStrict('utf-16le', bytes.subarray(2));
+      if (t !== null) return { text: t, encoding: 'utf-16le' };
+    }
+    if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
+      const t = tryDecodeStrict('utf-16be', bytes.subarray(2));
+      if (t !== null) return { text: t, encoding: 'utf-16be' };
+    }
+    const strict = tryDecodeStrict('utf-8', bytes);
+    if (strict !== null) return { text: strict, encoding: 'utf-8' };
+
+    let loose;
+    try { loose = new TextDecoder('gbk').decode(bytes); }
+    catch (e) { loose = new TextDecoder('utf-8').decode(bytes); }
+    return { text: loose, encoding: 'non-utf8' };
+  }
+
+  async function readNodeText(node) {
+    let bytes;
+    if (treeState.mode === 'snapshot') {
+      bytes = new Uint8Array(await node.ref.arrayBuffer());
+    } else {
+      bytes = new Uint8Array(await (await node.ref.getFile()).arrayBuffer());
+    }
+    return decodeBytes(bytes);
+  }
+
+  async function openTreeNode(node) {
+    try {
+      const dec = await readNodeText(node);
+      // 换文档就是换 editor.value —— 渲染层是纯函数，主题 / 元数据 / 大纲 /
+      // 字数统计 / 水印 / 外链脚注全部自动跟随，这里一行都不用改。
+      editor.value = dec.text;
+      renderMarkdown();
+      // 沿用单文档那套存档：刷新后仍停在这篇（F5-b 再换成工作区存档）
+      saveContent();
+      treeState.currentPath = node.path;
+      suppressSync();
+      editor.scrollTop = 0;
+      previewWrap.scrollTop = 0;
+      renderTree();
+      const enc = dec.encoding;
+      // 打开成功不弹提示（正文已经换掉，浮层只会碍事）；
+      // 但编码例外必须说 —— 非 UTF-8 / UTF-16 时正文是被兜底解码出来的，
+      // 用户有权知道眼前这份内容不是原文件字节的忠实还原，而且是只读的。
+      if (enc === 'non-utf8') showToast('非 UTF-8 文件，已按 GBK 只读预览', 'error');
+      else if (enc.indexOf('utf-16') === 0) showToast(enc.toUpperCase() + ' 文件，仅只读预览', 'error');
+    } catch (err) {
+      showToast('打开失败：' + ((err && err.message) || err), 'error');
+    }
+  }
+
+  async function pickFolder() {
+    if (treeState.mode !== 'pick') return;
+    let handle;
+    try {
+      handle = await window.showDirectoryPicker();
+    } catch (err) {
+      return; // 用户按了取消 —— 不是错误，不打扰
+    }
+    if (!handle) return;
+
+    treeState.root = makeNode(handle.name, 'dir', '', handle);
+    treeState.currentPath = '';
+    treeState.expanded.clear();
+    renderTree();
+    setTreePanel(true);
+
+    // 顶层先读一层，用户点开子目录时再往下钻
+    treeState.root.loading = true;
+    renderTree();
+    try {
+      await loadChildren(treeState.root);
+    } catch (err) {
+      treeState.root.error = (err && err.message) || String(err);
+    }
+    treeState.root.loading = false;
+    renderTree();
+    showToast('已打开文件夹：' + handle.name + '（仅显示 Markdown 文档）');
+  }
+
+  // 「选择文件夹」在两种能力下走两条通道：完整模式有目录句柄，快照模式只能借 input
+  function requestFolder() {
+    if (treeState.mode === 'pick') { pickFolder(); return; }
+    if (treeState.mode === 'snapshot') folderInput.click();
+  }
+
+  function onFolderInputChange(e) {
+    const files = Array.prototype.slice.call(e.target.files || []);
+    e.target.value = '';   // 清空才能重复选同一个目录
+    if (!files.length) return;
+
+    treeState.root = buildSnapshotTree(files);
+    treeState.currentPath = '';
+    treeState.expanded.clear();
+    setTreePanel(true);
+    showToast('已打开文件夹：' + treeState.root.name + '（只读快照，仅显示 Markdown 文档）');
+  }
+
+  function onTreeRowClick(row) {
+    const node = findNode(row.dataset.path);
+    if (!node) return;
+    if (node.kind === 'dir') { toggleDir(node); return; }
+    // 树里只会出现 Markdown 文档（非 Markdown 在枚举时就过滤掉了），点开即可
+    openTreeNode(node);
+  }
+
+  // 抽屉宽度：拖动右缘调整，宽度存在 CSS 变量 --ftw 上，并记进 localStorage
+  (function initTreeWidth() {
+    const saved = parseInt(localStorage.getItem(TREE_W_KEY), 10);
+    if (!isNaN(saved) && saved >= 180 && saved <= 640) treePanel.style.setProperty('--ftw', saved + 'px');
+  })();
+
+  let treeResizing = false;
+
+  treePanel.addEventListener('click', function (e) {
+    if (e.target.closest('[data-tree-pick]')) { requestFolder(); return; }
+    const row = e.target.closest('.tree-row');
+    if (row) onTreeRowClick(row);
+  });
+
+  treeResizer.addEventListener('mousedown', function (e) {
+    treeResizing = true;
+    treeResizer.classList.add('dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function (e) {
+    if (!treeResizing) return;
+    const w = Math.min(640, Math.max(180, e.clientX - 12));
+    treePanel.style.setProperty('--ftw', w + 'px');
+  });
+
+  document.addEventListener('mouseup', function () {
+    if (!treeResizing) return;
+    treeResizing = false;
+    treeResizer.classList.remove('dragging');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    const w = parseInt(treePanel.style.getPropertyValue('--ftw'), 10);
+    if (!isNaN(w)) { try { localStorage.setItem(TREE_W_KEY, String(w)); } catch (e) {} }
+  });
+
+  // ----- 收起后的悬浮球：拖动改位置，轻点展开抽屉 -----
+  // 「拖动」与「点击」靠位移阈值区分：指针抬起时总位移小于 PEEK_DRAG_SLOP 才算一次点击。
+  // 不这么做的话，每次把球挪开都会顺手把抽屉弹出来。
+  const PEEK_SIZE = 44;
+  const PEEK_DRAG_SLOP = 4;
+
+  (function initTreePeek() {
+    if (!treePeek) return;
+
+    function place(x, y) {
+      const w = window.innerWidth || document.documentElement.clientWidth || 0;
+      const h = window.innerHeight || document.documentElement.clientHeight || 0;
+      // 钳在视口内 —— 存下来的位置可能来自一个更大 / 更小的窗口
+      const nx = Math.min(Math.max(x, 8), Math.max(8, w - PEEK_SIZE - 8));
+      const ny = Math.min(Math.max(y, 8), Math.max(8, h - PEEK_SIZE - 8));
+      treePeek.style.left = nx + 'px';
+      treePeek.style.top = ny + 'px';
+    }
+
+    function readPos() {
+      return { x: parseFloat(treePeek.style.left), y: parseFloat(treePeek.style.top) };
+    }
+
+    function persist() {
+      const p = readPos();
+      if (isNaN(p.x) || isNaN(p.y)) return;
+      try { localStorage.setItem(TREE_PEEK_KEY, JSON.stringify({ x: p.x, y: p.y })); } catch (e) {}
+    }
+
+    (function restore() {
+      let saved = null;
+      try { saved = JSON.parse(localStorage.getItem(TREE_PEEK_KEY) || 'null'); } catch (e) {}
+      if (saved && typeof saved.x === 'number' && typeof saved.y === 'number') {
+        place(saved.x, saved.y);
+        return;
+      }
+      // 默认贴左缘、垂直居中 —— 与从前那片把手同一个位置，只是换成了球
+      const h = window.innerHeight || document.documentElement.clientHeight || 0;
+      place(12, (h - PEEK_SIZE) / 2);
+    })();
+
+    window.addEventListener('resize', function () {
+      const p = readPos();
+      if (!isNaN(p.x) && !isNaN(p.y)) place(p.x, p.y);
+    });
+
+    let dragging = false;
+    let moved = false;
+    let startX = 0, startY = 0, baseX = 0, baseY = 0;
+
+    treePeek.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      const p = readPos();
+      dragging = true;
+      moved = false;
+      startX = e.clientX;
+      startY = e.clientY;
+      baseX = isNaN(p.x) ? 0 : p.x;
+      baseY = isNaN(p.y) ? 0 : p.y;
+      treePeek.classList.add('dragging');
+      // 「按到了」的反馈：蓝 → 橙。不用 :active —— pointerdown 里 preventDefault() 之后
+      // 浏览器不再派发 mousedown，:active 未必成立，显式加 class 才可控、可测。
+      treePeek.classList.add('pressing');
+      try { treePeek.setPointerCapture(e.pointerId); } catch (err) {}
+      e.preventDefault();
+    });
+
+    treePeek.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (!moved && Math.abs(dx) + Math.abs(dy) < PEEK_DRAG_SLOP) return;
+      // 一旦位移过阈值就确定是在「拖」而不是在「点」——橙色退回蓝色
+      if (!moved) treePeek.classList.remove('pressing');
+      moved = true;
+      place(baseX + dx, baseY + dy);
+    });
+
+    function endDrag(e) {
+      if (!dragging) return;
+      dragging = false;
+      treePeek.classList.remove('dragging');
+      treePeek.classList.remove('pressing');
+      try { if (e && e.pointerId != null) treePeek.releasePointerCapture(e.pointerId); } catch (err) {}
+      if (moved) persist();
+    }
+
+    treePeek.addEventListener('pointerup', function (e) {
+      const wasMoved = moved;
+      endDrag(e);
+      if (!wasMoved) setTreePanel(true);
+    });
+    treePeek.addEventListener('pointercancel', endDrag);
+  })();
+
+  // 能力不够时把入口与抽屉整块摘掉，而不是渲染出来再报错
+  function initFolderMode() {
+    if (FOLDER_CAP === 'none') {
+      [btnOpenFolder, folderInput, treePanel, treePeek].forEach(function (el) {
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+      });
+      // 菜单里只剩「文件」一项了 —— 收掉箭头，别看着像个空下拉
+      openWrap.classList.add('single');
+      return;
+    }
+    btnOpenFolder.hidden = false;
+    treeModeEl.textContent = FOLDER_CAP === 'snapshot' ? '只读' : '';
+
+    // 抽屉的显示 / 隐藏有两条路：顶栏菜单里那一项是开关（展开时带激活态），
+    // 抽屉自己的「收起」与那枚悬浮球都能把它收掉 / 拉回来 —— 后者是收起后唯一一眼可见的入口。
+    btnOpenFolder.addEventListener('click', function () {
+      setOpenMenu(false);
+      setTreePanel(!treeState.visible);
+    });
+    $('#treeClose').addEventListener('click', function () { setTreePanel(false); });
+    $('#treeExpandAll').addEventListener('click', function () { expandAll(); });
+    $('#treeCollapseAll').addEventListener('click', function () { collapseAll(); });
+    folderInput.addEventListener('change', onFolderInputChange);
+    renderTree();
+  }
+
   // ===== Init =====
   function init() {
     loadContent();
@@ -2175,6 +3031,7 @@ img { max-width: 100%; }`;
     try { localStorage.removeItem('mdtu-platform'); } catch (e) { /* 隐私模式等场景忽略 */ }
     applyTheme(state.theme);
     applyWatermark();
+    initFolderMode();
     $('#btnPreviewScroll').classList.add('active');
     renderMarkdown();
     editor.focus();
@@ -2192,4 +3049,248 @@ img { max-width: 100%; }`;
     init();
   }
 
+})();
+
+/* ===== 滚动条悬停放大（2026-10-15）=====
+   文档长时预览区右侧会出现滚动条，但太细不好抓（双屏时鼠标很容易滑到另一块屏幕）。
+   做法：指针进到容器右缘 HOT_BAND px 内 → 给容器加 .sb-hot → CSS 把拇指由 6px 画粗到 12px；
+   指针移回内容区或离开容器立刻恢复。CSS 侧同名规则在 style.css「===== Scrollbar =====」段。
+   ⚠️ 槽宽（14px）自始至终不变，只改拇指的**画法**（透明边框 4px → 1px）→ 放大时正文不重排；
+      若改成动 width，滚动条会挤走 6px 内容宽度，整篇文字会重排。
+   ⚠️ 整段放在文件末尾的独立作用域：塞进上面那个 IIFE 会让 app.js 后续行号整体后移，
+      连带 README / DESIGN / ROADMAP / F5 里上百处行号引用都要重算，故有意放在最末。 */
+(function initScrollbarHover() {
+  const HOT_BAND = 18; // 右缘往里 18px 内（含 14px 滚动条槽）算「靠近滚动条」
+  const zones = ['previewWrap', 'editor']
+    .map((id) => document.getElementById(id))
+    .filter(Boolean);
+
+  zones.forEach((zone) => {
+    zone.addEventListener('mousemove', (e) => {
+      // 只有真的出现纵向滚动条时才放大（内容没超屏就别变粗）
+      const hot =
+        e.clientX >= zone.getBoundingClientRect().right - HOT_BAND &&
+        zone.scrollHeight > zone.clientHeight + 1;
+      if (hot !== zone.classList.contains('sb-hot')) zone.classList.toggle('sb-hot', hot);
+    });
+    // 离开容器（含拖动结束后滑走）一律恢复
+    zone.addEventListener('mouseleave', () => zone.classList.remove('sb-hot'));
+    zone.addEventListener('blur', () => zone.classList.remove('sb-hot'));
+  });
+})();
+
+/* ===== Mermaid 放大浮层（点击图表 → 全屏查看）2026-10-15 =====
+   点击预览里的任意 Mermaid 图 → 全屏浮层里查看。图是**克隆**来的现成 SVG（不重新渲染），
+   所以与预览像素级一致、矢量放大不糊；浮层挂在 <body> 下（不在 #preview 内）→ 导出 HTML /
+   复制公众号 / 导出 Word 三条产物都看不到它，零污染。
+   交互：滚轮缩放（以指针为锚点）、按住拖拽平移、双击复位、Esc / 点空白 / 右上按钮关闭。
+   初始「适应窗口」，且**最多放大到原图的 2 倍**（免得小图被拉成巨无霸）。
+   ⚠️ 三个实测坑（tool: mermaid-zoom-probe.js，详见 style.css 同名段注释）：
+     ① 图必须给明确像素尺寸，否则 flex 里会塌成 0×0；
+     ② mermaid 写在 svg 上的内联 max-width 必须清掉，否则根本放不大；
+     ③ 浮层不在 .markdown-body 内，图内度量回钉在浮层里又带了一份（style.css）。
+   ⚠️ Esc：本文件里已有 4 处 Esc 消费者（导出菜单 / 打开菜单 / 退出全屏 / 水印弹窗），
+      这里用**捕获阶段 + stopImmediatePropagation**，保证「只关浮层，不会顺手退出全屏」。
+   ⚠️ 整段追加在文件末尾（同 initScrollbarHover）：插进上面那个 IIFE 会让后续行号整体后移，
+      连带文档里上百处 app.js:NNN 引用都要重算。 */
+(function initMermaidZoom() {
+  const FIT_MAX = 2; // 初始适应窗口时，最多放大到原图 2 倍
+  const ZOOM_MIN = 0.2; // 滚轮缩放下限（相对原图尺寸）
+  const ZOOM_MAX = 4; // 滚轮缩放上限
+  const FILL_W = 0.94; // 横向铺满比例
+  const FILL_H = 0.86; // 纵向铺满比例
+
+  let box = null;
+  let stage = null;
+  let figure = null;
+  let nat = { w: 0, h: 0 }; // 原图尺寸（= SVG viewBox）
+  let scale = 1;
+  let tx = 0;
+  let ty = 0;
+  let drag = null; // { x, y, moved, id } 拖拽状态
+  let swallowClick = false; // 刚结束的这次指针交互是拖拽 → 随之补发的 click 要吞掉（否则被当成「点空白」关掉浮层）
+  let dragSinceDown = false; // 本次按下以来发生过拖拽（两次快速拖拽也会被判成 dblclick → 照样不能复位）
+  let zoomSeq = 0; // 浮层克隆体的 id 序号（避免与页面上原图撞 id）
+
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+  const isOpen = () => !!box && box.classList.contains('open');
+
+  function apply() {
+    figure.style.transform = `translate(${tx}px, ${ty}px) scale(${scale})`;
+  }
+
+  // 适应窗口：按两边都装得下来算，再夹到 [ZOOM_MIN, FIT_MAX]
+  function fitScale() {
+    const w = window.innerWidth * FILL_W;
+    const h = window.innerHeight * FILL_H;
+    return clamp(Math.min(w / nat.w, h / nat.h), ZOOM_MIN, FIT_MAX);
+  }
+
+  function reset() {
+    scale = fitScale();
+    // figure 的左上角落在视口中心（left/top:50%），再退回半个自身尺寸即为居中
+    tx = (-nat.w * scale) / 2;
+    ty = (-nat.h * scale) / 2;
+    apply();
+  }
+
+  function ensureBox() {
+    if (box) return;
+    box = document.createElement('div');
+    box.className = 'mermaid-zoom';
+    box.innerHTML =
+      '<div class="mermaid-zoom-stage"><div class="mermaid-zoom-figure"></div></div>' +
+      '<button type="button" class="mermaid-zoom-close" aria-label="关闭">✕</button>' +
+      '<div class="mermaid-zoom-hint">滚轮缩放 · 按住拖动 · 双击复位 · Esc 关闭</div>';
+    // ★ 挂在 body 上（不在 #preview 里）→ 产物里不会出现浮层
+    document.body.appendChild(box);
+    stage = box.querySelector('.mermaid-zoom-stage');
+    figure = box.querySelector('.mermaid-zoom-figure');
+
+    box.querySelector('.mermaid-zoom-close').addEventListener('click', (e) => {
+      e.stopPropagation();
+      close();
+    });
+    // 点空白关闭：只要没点在图上就关（关闭按钮自己 stopPropagation）。
+    // ⚠️ 拖拽过的那一次 click 必须**吞掉**（取证：mermaid-zoom-drag.js）：拖拽后浏览器会补发一个 click，
+    //   而 click 的 target 按「**按下点与抬起点的共同祖先**」算 —— 平移时把手拖到图外再松开（很常见），
+    //   target 就落成 .mermaid-zoom-stage → 被「不是图」判据命中 → close()（= 一松手视图就没了）。
+    box.addEventListener('click', (e) => {
+      if (swallowClick) { swallowClick = false; return; }
+      if (e.target.closest && e.target.closest('.mermaid-zoom-figure')) return;
+      if (e.target.closest && e.target.closest('.mermaid-zoom-close')) return;
+      close();
+    });
+
+    // wheel 挂在浮层本体上（不只舞台）：指针落在关闭按钮上时也要吃掉滚动
+    box.addEventListener('wheel', onWheel, { passive: false });
+    stage.addEventListener('pointerdown', onDown);
+    stage.addEventListener('pointermove', onMove);
+    stage.addEventListener('pointerup', onUp);
+    stage.addEventListener('pointercancel', onUp);
+    // 双击复位：⚠️ 两次快速**拖拽**也会被浏览器判成 dblclick（两次 click 都落在舞台上）→ 得挡掉
+    stage.addEventListener('dblclick', () => { if (!dragSinceDown) reset(); });
+  }
+
+  function onWheel(e) {
+    if (!isOpen()) return;
+    e.preventDefault();
+    const cx = window.innerWidth / 2;
+    const cy = window.innerHeight / 2;
+    // 指针在图内坐标（原图像素）；缩放前后让这个点钉在原地
+    const qx = (e.clientX - cx - tx) / scale;
+    const qy = (e.clientY - cy - ty) / scale;
+    const next = clamp(scale * Math.exp(-e.deltaY * 0.0015), ZOOM_MIN, ZOOM_MAX);
+    if (next === scale) return;
+    tx += (scale - next) * qx;
+    ty += (scale - next) * qy;
+    scale = next;
+    apply();
+  }
+
+  function onDown(e) {
+    if (e.button !== 0) return;
+    swallowClick = false; // 新的指针交互开始，先复位
+    dragSinceDown = false;
+    drag = { x: e.clientX, y: e.clientY, moved: false, id: e.pointerId };
+  }
+
+  function onMove(e) {
+    if (!drag) return;
+    const dx = e.clientX - drag.x;
+    const dy = e.clientY - drag.y;
+    // 先过 3px 阈值：普通点击不进入拖拽，也就不去 setPointerCapture（见上面 click 的注释）
+    if (!drag.moved && Math.hypot(dx, dy) < 3) return;
+    if (!drag.moved) {
+      drag.moved = true;
+      swallowClick = true; // 这一次是拖拽 → 放开时补发的 click 不能当「点空白」
+      dragSinceDown = true;
+      stage.classList.add('dragging');
+      if (stage.setPointerCapture) stage.setPointerCapture(drag.id);
+    }
+    tx += dx;
+    ty += dy;
+    drag.x = e.clientX;
+    drag.y = e.clientY;
+    apply();
+  }
+
+  function onUp() {
+    drag = null;
+    if (stage) stage.classList.remove('dragging');
+  }
+
+  function open(svg) {
+    const vb = svg.viewBox && svg.viewBox.baseVal;
+    const rect = svg.getBoundingClientRect();
+    const w = Math.round((vb && vb.width) || rect.width);
+    const h = Math.round((vb && vb.height) || rect.height);
+    if (!w || !h) return;
+
+    ensureBox();
+    nat = { w, h };
+    // 克隆：⚠️ 不能简单 removeAttribute('id') —— mermaid 图内 <style> 是**按 #id 作用域**写的
+    // （`#mermaid-svg-3 .node rect {…}`），id 一去掉节点样式全丢、变成黑底。
+    // 所以把 id 连同图内所有引用（<style>、url(#id…)、aria-*）整体改名成浮层专用 id：
+    // 既保住样式作用域，又不会和页面上原图撞 id。
+    const srcId = svg.getAttribute('id');
+    const zoomId = 'mermaid-zoom-svg-' + zoomSeq++;
+    const holder = document.createElement('div');
+    holder.innerHTML = srcId ? svg.outerHTML.split(srcId).join(zoomId) : svg.outerHTML;
+    const clone = holder.firstElementChild;
+    // 坑②：mermaid 给 svg 写了内联 max-width，不清掉就放不大
+    clone.style.maxWidth = 'none';
+    // 坑①：给明确像素尺寸（同时避免 svg 自带的 width="100%" 在浮层里塌成 0）
+    clone.setAttribute('width', w);
+    clone.setAttribute('height', h);
+    clone.style.width = w + 'px';
+    clone.style.height = h + 'px';
+    figure.replaceChildren(clone);
+
+    reset();
+    box.classList.add('open');
+    // 把焦点移进浮层：既避免按键漏进背后的编辑器，也让 Enter/Space 能直接关
+    box.querySelector('.mermaid-zoom-close').focus();
+  }
+
+  function close() {
+    if (!isOpen()) return;
+    box.classList.remove('open');
+    figure.replaceChildren();
+    // 焦点随关闭按钮一起消失（display:none）→ 浏览器自动交还给 body
+  }
+
+  // 事件委托：图每次重渲染都会重建节点，绑在 #preview 上才不会失效
+  const preview = document.getElementById('preview');
+  if (preview) {
+    preview.addEventListener('click', (e) => {
+      if (isOpen()) return;
+      const holder = e.target.closest && e.target.closest('.mermaid-rendered');
+      if (!holder) return;
+      if (e.target.closest('a')) return; // 图内链接（securityLevel:loose 下可用）不抢点击
+      const svg = holder.querySelector('svg');
+      if (!svg) return; // 渲染失败时的错误提示块，没有 svg
+      e.preventDefault();
+      open(svg);
+    });
+  }
+
+  // Esc 优先级：捕获阶段拦下，避免顺带触发「退出全屏」等已有处理
+  document.addEventListener(
+    'keydown',
+    (e) => {
+      if (!isOpen()) return;
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        close();
+      }
+    },
+    true
+  );
+
+  // 尺寸变了（转屏 / 改窗口 / 进出全屏）→ 重新适应窗口
+  window.addEventListener('resize', () => {
+    if (isOpen()) reset();
+  });
 })();

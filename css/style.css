@@ -21,6 +21,7 @@
   --accent: #3b82f6;
   --accent-hover: #2563eb;
   --accent-light: #eff6ff;
+  --accent-press: #f97316;   /* 悬浮球按下（点击）时的反馈色：蓝 → 橙 */
   --danger: #ef4444;
   --success: #10b981;
   --shadow-sm: 0 1px 2px rgba(0,0,0,.06);
@@ -68,9 +69,25 @@ body {
   gap: 8px;
 }
 
+/* 顶栏在窄窗口下本来就装不下（1280px 下 #btnExport / #btnCopy 已经落到可视区外，
+   加「文件夹」入口后又把「外链转脚注」也挤了出去）。这里让中间那组退化成
+   可横向滚动的条 —— 右侧主操作（文件夹 / 打开 / 导出 / 复制）永不缺席。
+   `safe center` 是必需的：居中溢出会把左端裁掉且滚不回去。 */
+.header-left,
+.header-right {
+  flex-shrink: 0;
+}
+
 .header-center {
   flex: 1;
-  justify-content: center;
+  min-width: 0;
+  justify-content: safe center;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.header-center::-webkit-scrollbar {
+  height: 0;
 }
 
 .header-right {
@@ -186,7 +203,11 @@ body {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  min-width: 216px;
+  /* 宽度跟着内容走。之前钉死 min-width: 216px，又把后缀标签 margin-left:auto 右对齐，
+     于是每一行中间都被撑出一大片空白（菜单看着比内容宽一截）。 */
+  width: max-content;
+  min-width: 0;
+  max-width: 260px;
   padding: 4px;
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
@@ -230,11 +251,34 @@ body {
   color: var(--accent);
 }
 
+/* 后缀标签紧跟着文字，**不再右对齐**：
+   之前是 margin-left:auto 把它推到右端，于是短行中间被撑出一大片空白 ——
+   宽度再跟着内容走也没用，空白是「右对齐」造出来的，不是宽度造出来的。 */
 .export-item .export-ext {
-  margin-left: auto;
-  padding-left: 14px;
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* 「打开」下拉复用上面这套骨架，只补三条：
+   1) 菜单项也能表示「开关已开」（文件夹抽屉正在展开时）
+   2) 能力不足时 #btnOpenFolder 带 hidden —— 必须压过 .export-item 的 display:flex
+   3) 菜单里只剩一项时把箭头收掉，避免看着像个空下拉 */
+.export-item.active {
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.export-item.active svg {
+  color: var(--accent);
+}
+
+.export-item[hidden] {
+  display: none !important;
+}
+
+#openWrap.single .export-caret {
+  display: none;
 }
 
 /* ===== Main Layout ===== */
@@ -834,6 +878,118 @@ body {
   height: auto;
 }
 
+/* 图内排版度量「回钉」——修「节点文字被挡住」
+   mermaid 先用**字体原生的 normal 行高**把节点框与 foreignObject 量好，再把文字画进
+   同样大小的框里；foreignObject **会裁掉超出部分**。这一行高是逐字体不同的实测值（16px）：
+     trebuchet ms（拉丁）≈ 19px/行，中文字体（回退）≈ 24px/行
+   主题与设备档的行高 / 字距 / 字体是继承下来的，会顺着 SVG 漏进 foreignObject 的标签 div：
+     主题 行高 1.6（晴空 1.8）→ 每行裁 1~2px；iPad/APP 1.7 / 1.75 → 每行裁 2~4px；
+     APP 字距 +.5px → 字比框宽，横向裁 2~12px；钉**固定倍数**也错：1.5 → 拉丁每行 24
+     而框只有 19，两行就裁 10px（2026-10-15 二修）。所以这里把度量**钉回 mermaid 的量算
+   条件**：字体 16px、行高 normal、无字距。改了 mermaid.initialize 的 fontFamily /
+   fontSize 要同步这里。此选择器只落在 .mermaid-rendered 内部，不影响正文。 */
+
+.markdown-body .mermaid-rendered svg * {
+  font-family: "trebuchet ms", verdana, arial, sans-serif;
+  font-size: 16px;
+  line-height: normal;
+  letter-spacing: normal;
+  margin: 0;
+}
+
+/* ===== Mermaid 放大浮层（点击图表 → 全屏查看，iOS 毛玻璃）=====
+   浮层里放的是**克隆**来的现成 SVG（不重新渲染）→ 与预览像素级一致、矢量放大不糊。
+   ⚠️ 三个实测坑（见 tools/mermaid-zoom-probe.js）：
+     ① svg 只给 max-width 而 width:auto，在 flex 里会塌成 0×0（整张图看不见）→ 必须给明确像素尺寸；
+     ② mermaid 给 svg 写了内联 max-width → **不覆盖就根本放不大**（由 JS 置 maxWidth:'none'）；
+     ③ 浮层不在 .markdown-body 内 → 图内度量回钉要在这里**再带一份**（与 Mermaid 段同源）。
+   浮层挂在 <body> 下（不在 #preview 内）→ 导出 HTML / 复制公众号 / 导出 Word 三条产物都看不到它。 */
+.mermaid-zoom {
+  position: fixed;
+  inset: 0;
+  z-index: 1500; /* modal(1000) 之上、toast(2000) 之下 */
+  display: none;
+  /* ⛔ 必须禁掉文本选中（2026-10-16 用户反馈「拖拽会选中一部分文字、选区随指针变化」）：
+     浮层里是克隆来的现成 SVG，图内文字默认 user-select:auto —— 按下就以按下点为锚点
+     落下选区，按住拖动时浏览器延伸成原生选区。浮层只是查看器，本来也不需要选字。 */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.mermaid-zoom.open { display: block; }
+
+/* 毛玻璃遮罩（iOS 风）：模糊 + 提饱和 */
+.mermaid-zoom::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(246, 248, 251, .72);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+}
+
+/* 舞台：铺满视口，按住拖拽平移 */
+.mermaid-zoom-stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+}
+
+.mermaid-zoom-stage.dragging { cursor: grabbing; }
+
+/* 图：JS 给原生像素尺寸，缩放/平移整体走 transform（GPU，不触发重排） */
+.mermaid-zoom-figure {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.mermaid-zoom-figure svg { display: block; }
+
+.mermaid-zoom-figure svg * {
+  font-family: "trebuchet ms", verdana, arial, sans-serif;
+  font-size: 16px;
+  line-height: normal;
+  letter-spacing: normal;
+  margin: 0;
+}
+
+.mermaid-zoom-close {
+  position: absolute;
+  top: 18px;
+  right: 20px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .82);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, .18);
+  color: #334155;
+  font-size: 17px;
+  line-height: 36px;
+  cursor: pointer;
+}
+
+.mermaid-zoom-close:hover { background: #fff; }
+
+.mermaid-zoom-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 16px;
+  text-align: center;
+  font-size: 12px;
+  color: #64748b;
+  pointer-events: none;
+}
+
+.markdown-body .mermaid-rendered { cursor: zoom-in; }
+
 /* ===== KaTeX ===== */
 .markdown-body .katex {
   font-size: 1.05em;
@@ -851,26 +1007,26 @@ body {
   vertical-align: super;
 }
 
-/* ===== Scrollbar ===== */
-.preview-wrap::-webkit-scrollbar,
-.editor-wrap::-webkit-scrollbar {
-  width: 8px;
-}
+/* ===== Scrollbar（悬停放大：槽宽恒定 14px；常态画 6px 细拇指，靠近右缘 / 悬停时画 12px） ===== */
+.preview-wrap::-webkit-scrollbar, .editor::-webkit-scrollbar { width: 14px; }
 
-.preview-wrap::-webkit-scrollbar-track,
-.editor-wrap::-webkit-scrollbar-track {
-  background: transparent;
-}
+.preview-wrap::-webkit-scrollbar-track, .editor::-webkit-scrollbar-track { background: transparent; }
 
-.preview-wrap::-webkit-scrollbar-thumb,
-.editor-wrap::-webkit-scrollbar-thumb {
+.preview-wrap::-webkit-scrollbar-thumb, .editor::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border-radius: 4px;
+  background-clip: content-box;
+  border: 4px solid transparent;
+  border-radius: 999px;
 }
 
-.preview-wrap::-webkit-scrollbar-thumb:hover,
-.editor-wrap::-webkit-scrollbar-thumb:hover {
+/* 指针靠近右缘（.sb-hot 由 JS 加，见 app.js 末「滚动条悬停放大」）或直接悬停在拇指上 → 边框收到
+   1px，拇指视觉上由 6px 变粗到 12px。⚠️ 槽宽自始至终 14px，放大只改**画法**不改宽度 → 正文不重排。 */
+.preview-wrap.sb-hot::-webkit-scrollbar-thumb, .editor.sb-hot::-webkit-scrollbar-thumb,
+.preview-wrap::-webkit-scrollbar-thumb:hover, .editor::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+  background-clip: content-box;
+  border-width: 1px;
+  border-radius: 999px;
 }
 
 /* ===== Responsive ===== */
@@ -973,6 +1129,272 @@ body {
 .outline-level-4 { padding-left: 56px; font-size: 12px; }
 .outline-level-5 { padding-left: 70px; font-size: 12px; }
 .outline-level-6 { padding-left: 84px; font-size: 12px; }
+
+/* ===== F5：文件树抽屉 =====
+   刻意复用 .outline-panel 这套浮层骨架：display:none / .show 切换 / 打印时隐藏
+   三件事都由既有规则承担，这里只把它从「右侧居中浮层」改成「左侧通栏抽屉」。
+   毛玻璃只是叠在布局之上的观感，不参与任何尺寸计算。 */
+.file-tree-panel {
+  left: 12px;
+  right: auto;
+  top: calc(var(--header-height) + 12px);
+  bottom: 12px;
+  transform: none;
+  width: var(--ftw, 264px);
+  max-height: none;
+  background: rgba(255, 255, 255, .82);
+  backdrop-filter: blur(14px) saturate(1.7);
+  -webkit-backdrop-filter: blur(14px) saturate(1.7);
+}
+
+/* 顶部这一行 = 工作区名字 + 操作。没有单独的「文件树」标题栏：
+   名字本身就是这一行的内容，操作挂在它的尾部。
+   字号与下面每一行严格一致（同为 14px）——面板里混着 11/12/13/14px 几种字号最显乱。 */
+.tree-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  padding: 5px 6px 5px 12px;
+  min-height: 38px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 14px;
+}
+
+.tree-head-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.tree-root {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.tree-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  line-height: 1;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background .15s, color .15s;
+}
+
+.tree-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* 没有工作区时（#treeRoot 为空）这三个操作无从谈起，头部只留「收起」 */
+.tree-btn[hidden] {
+  display: none !important;
+}
+
+/* 只读降级模式下的角标（完整模式为空字符串，不占位） */
+.tree-mode {
+  flex-shrink: 0;
+  font-size: 14px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.tree-body {
+  padding: 8px 0;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px 5px 0;   /* padding-left 由 JS 按层级内联设置 */
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: background .12s ease, color .12s ease;
+}
+
+.tree-row:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.tree-row.active {
+  background: var(--accent-light);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.tree-caret {
+  flex: 0 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  transition: transform .15s ease;
+}
+
+.tree-row.open .tree-caret {
+  transform: rotate(90deg);
+}
+
+.tree-ico {
+  flex: 0 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.tree-row.active .tree-ico {
+  color: var(--accent);
+}
+
+.tree-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 空目录 / 加载中 / 读取失败：各占一行，别让树看起来像断了。
+   字号与文件行一致（14px），只有颜色和斜体把它和可点的行区分开。 */
+.tree-note {
+  padding: 4px 12px;
+  font-size: 14px;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.tree-note.tree-error {
+  color: var(--danger);
+}
+
+.tree-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.tree-empty p {
+  margin-top: 12px;
+}
+
+.tree-pick {
+  padding: 6px 14px;
+  font-size: 14px;
+}
+
+.tree-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  transition: background .15s ease;
+}
+
+.tree-resizer:hover,
+.tree-resizer.dragging {
+  background: var(--accent);
+}
+
+/* 探测不到文件夹 API 时入口整体摘掉；hidden 必须压过 .header-btn 的 inline-flex */
+.header-btn[hidden] {
+  display: none !important;
+}
+
+/* 抽屉收起后的入口：一枚**可拖动的悬浮球**（44×44，圆形，实心蓝 + 投影）。
+   原先贴左缘的长条容易被当成页面装饰，也让「收起之后怎么找回」不够显眼；
+   圆球一眼就是「能点的东西」，而且可以拖开 —— 不挡正文。
+   底色用**实心主题蓝**（不是浅底 + 蓝图标）：浅底在白色正文上几乎化进背景，
+   「一眼可见」这条要求只有实心色才兜得住。
+   left / top 由 JS 内联写入（拖动 + 位置持久化 + 视口钳制），这里只定形状与观感。 */
+.tree-peek {
+  position: fixed;
+  left: 12px;
+  top: calc(50% - 22px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  background: var(--accent);
+  color: #ffffff;
+  cursor: grab;
+  z-index: 790;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .16);
+  touch-action: none;   /* 触屏上由我们接管拖动，别让浏览器抢去做滚动 */
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background .15s ease, border-color .15s ease, box-shadow .15s ease;
+}
+
+.tree-peek:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .22);
+}
+
+/* 按下（= 一次点击）：蓝 → 橙，给一个明确的「按到了」反馈。
+   ⚠️ 不能用 :active —— pointerdown 里 preventDefault() 之后浏览器不再派发 mousedown，
+   :active 未必成立；所以由 JS 显式加 .pressing，颜色变化才可控、可测。
+   开始拖动时 JS 会把 .pressing 摘掉：于是「点击=橙、拖动=蓝」在颜色上也能分辨。 */
+.tree-peek.pressing {
+  background: var(--accent-press);
+  border-color: var(--accent-press);
+  box-shadow: 0 4px 14px rgba(249, 115, 22, .45);
+}
+
+/* 拖动中：去掉过渡（跟手），光标换成「抓着」 */
+.tree-peek.dragging {
+  cursor: grabbing;
+  transition: none;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .28);
+}
+
+.tree-peek[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 768px) {
+  .file-tree-panel {
+    left: 8px;
+    width: min(var(--ftw, 264px), calc(100vw - 16px));
+  }
+}
 
 /* ===== Footnote Section ===== */
 .footnote-section {
@@ -1325,9 +1747,10 @@ body {
   }
 }
 
-/* ===== Print / 导出 PDF =====
-   导出 PDF 走「window.print() + @media print」这条路（零依赖、矢量输出），
-   所以这里必须把界面壳子全部摘掉，只留预览区。缺了这段，打印结果会带上
+/* ===== Print / 打印 =====
+   「导出 PDF」是另一条路（离屏渲染 + jsPDF 下载，不经过这里）；
+   这一段只服务「打印」——走「window.print() + @media print」（零依赖、矢量输出、文字可选），
+   所以必须把界面壳子全部摘掉，只留预览区。缺了这段，打印结果会带上
    顶栏、编辑器和工具栏，还会被 .preview-wrap 的 overflow:auto 截成一页。 */
 @page {
   margin: 16mm;
@@ -1341,7 +1764,9 @@ body {
   .preview-toolbar,
   .outline-panel,
   .toast,
-  .modal-overlay {
+  .modal-overlay,
+  .mermaid-zoom,
+  .tree-peek {
     display: none !important;
   }
 
