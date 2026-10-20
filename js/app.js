@@ -548,7 +548,7 @@ $$
     // 先剥掉文档首部的元数据，再交给 marked
     const fm = splitFrontMatter(editor.value);
     fmCurrent = fm;
-    const md = fm.body;
+    const md = withTocSlot(fm.body);
 
     // Reset footnote state
     footnoteCounter = 0;
@@ -571,7 +571,7 @@ $$
       html = applyAutoNumbering(html);
     }
 
-    preview.innerHTML = html;
+    preview.innerHTML = html; fillTocSlot(); // 派生目录：占位符在这里换成当前标题的列表
 
     // Append footnote list (external links mode)
     if (state.footnoteLinks && footnoteList.length > 0) {
@@ -680,45 +680,45 @@ $$
   }
 
   // ===== TOC Generation =====
+  // 派生目录（derived TOC）：源码里只留一行 `<!-- TOC -->` 标记，列表本身不写进源码。
+  // 每次渲染按当前标题实时生成 → 永远不会过期，所以没有「更新目录」这个动作。
+  //   无标记       → 插一行标记
+  //   旧版整块     → 收成一行标记（列表写死在源码里，改完标题就过期）
+  //   已有标记     → 移除标记（按钮语义变成「移除目录」）
+  // 取舍：源码里看不到目录列表，换来的一致性——目录只存在于渲染层，
+  // 复制/导出拿到的都是当下标题的真值。锚点用渲染后标题的真实 id（fillTocSlot），
+  // 不自己拼 slug，避免标点被吃掉变成死链。带 `<!-- /TOC -->` 的旧文档仍按原文渲染，
+  // 点一次按钮即迁移成标记。
   function generateTOC() {
     const md = editor.value;
-    // 元数据必须留在文件最顶部：目录只在正文区间内查找与插入
+    // 元数据必须留在文件最顶部：目录标记只在正文区间内查找与插入
     const fm = splitFrontMatter(md);
     const head = fm.raw ? md.slice(0, md.length - fm.body.length) : '';
-    let body = fm.body;
-    const lines = body.split('\n');
-    const tocLines = ['<!-- TOC -->', ''];
-    let inCodeBlock = false;
+    const body = fm.body;
+    const MARK = '<!-- TOC -->';
 
-    for (const line of lines) {
-      if (/^```/.test(line.trim())) {
-        inCodeBlock = !inCodeBlock;
-        continue;
-      }
-      if (inCodeBlock) continue;
+    // 旧版：带结束标记的整块（列表写死，改完标题就过期）→ 收成一行标记
+    const legacy = /<!-- TOC -->[\s\S]*?<!-- \/TOC -->/;
+    // 新版：只有一行标记，列表在渲染时生成
+    const auto = /^[ \t]*<!-- TOC -->[ \t]*$/m;
 
-      const match = line.match(/^(#{1,4})\s+(.+)/);
-      if (match) {
-        const level = match[1].length;
-        const text = match[2].replace(/[#*`~]/g, '').trim();
-        const indent = '  '.repeat(level - 1);
-        tocLines.push(`${indent}- [${text}](#${text.toLowerCase().replace(/\s+/g, '-')})`);
-      }
+    if (legacy.test(body)) {
+      editor.value = head + body.replace(legacy, MARK);
+      renderMarkdown();
+      showToast('已转为自动目录（随标题实时更新）');
+      return;
+    }
+    if (auto.test(body)) {
+      editor.value = head + body.replace(/^[ \t]*<!-- TOC -->[ \t]*\r?\n?/m, '');
+      renderMarkdown();
+      showToast('目录已移除');
+      return;
     }
 
-    tocLines.push('', '<!-- /TOC -->');
-
-    // Check if TOC already exists
-    const tocRegex = /<!-- TOC -->[\s\S]*?<!-- \/TOC -->/;
-    if (tocRegex.test(body)) {
-      body = body.replace(tocRegex, tocLines.join('\n'));
-    } else {
-      // Insert at the top of the body (right after the metadata block)
-      body = tocLines.join('\n') + '\n\n' + body;
-    }
-    editor.value = head + body;
+    // 没有目录：插到正文最前面（元数据块之后）
+    editor.value = head + MARK + '\n\n' + body;
     renderMarkdown();
-    showToast('目录已插入');
+    showToast('目录已插入，之后随标题自动更新');
   }
 
   // ===== Update Counts =====
@@ -3042,6 +3042,69 @@ img { max-width: 100%; }`;
     previewWrap.scrollTop = 0;
   }
 
+  // ===== 派生目录（derived TOC）=====
+  // 两段：解析前把标记换成占位 div（marked 会原样透传 HTML 块），
+  // 渲染完再按 DOM 里真实标题补出列表。分两段是为了拿标题的真实 id ——
+  // 自己拼 slug 会和 marked 的规则错位（标点、重复标题加序号），产生死链。
+  const TOC_MARK_RE = /^[ \t]*<!--\s*TOC\s*-->[ \t]*$/m;
+  const TOC_CLOSE_RE = /<!--\s*\/TOC\s*-->/;
+
+  function withTocSlot(body) {
+    // 旧版整块（带结束标记）仍按原文渲染，由用户点按钮迁移成标记
+    if (TOC_CLOSE_RE.test(body)) return body;
+    // 逐行扫：围栏代码块里的标记是示例文本，不能换成占位符（讲解本功能的文档会被改写）
+    const lines = body.split('\n');
+    let fence = false;
+    for (let i = 0; i < lines.length; i++) {
+      if (/^ {0,3}(```|~~~)/.test(lines[i])) { fence = !fence; continue; }
+      if (fence) continue;
+      if (TOC_MARK_RE.test(lines[i])) {
+        lines[i] = '<div data-toc-slot="1"></div>';
+        break;
+      }
+    }
+    return lines.join('\n');
+  }
+
+  function fillTocSlot() {
+    const slot = preview.querySelector('[data-toc-slot]');
+    if (!slot) return;
+    const heads = preview.querySelectorAll('h1, h2, h3, h4');
+    if (!heads.length) {
+      slot.remove(); // 没有任何标题 → 目录为空，不留空壳
+      return;
+    }
+
+    const root = document.createElement('ul');
+    root.className = 'toc';
+    // 栈：当前每一层的 (标题级别, 该层的 ul)。层级跳跃（h1 → h3）也接得住。
+    const stack = [{ level: parseInt(heads[0].tagName.slice(1), 10), ul: root }];
+
+    Array.prototype.forEach.call(heads, (h) => {
+      const level = parseInt(h.tagName.slice(1), 10);
+      while (stack.length > 1 && level < stack[stack.length - 1].level) stack.pop();
+      let top = stack[stack.length - 1];
+      if (level > top.level) {
+        // 更深一级：挂到上一个 li 里面（没有上一个 li 就退化成同级）
+        const prev = top.ul.lastElementChild;
+        if (prev) {
+          const ul = document.createElement('ul');
+          prev.appendChild(ul);
+          top = { level: level, ul: ul };
+          stack.push(top);
+        }
+      }
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.textContent = h.textContent.trim(); // 含自动编号的前缀，和正文一致
+      if (h.id) a.setAttribute('href', '#' + h.id);
+      li.appendChild(a);
+      top.ul.appendChild(li);
+    });
+
+    slot.parentNode.replaceChild(root, slot);
+  }
+
   // Wait for libraries
   if (typeof marked === 'undefined' || typeof hljs === 'undefined') {
     setTimeout(init, 500);
@@ -3293,4 +3356,95 @@ img { max-width: 100%; }`;
   window.addEventListener('resize', () => {
     if (isOpen()) reset();
   });
+})();
+
+/* ============================================================
+ * 顶栏两个下拉互斥
+ *
+ * 「打开」与「导出」共用 .export-wrap / .export-menu 一套骨架，各自只负责自己的开合；
+ * 而两个触发按钮都做了 stopPropagation（否则会被自己的「点外部关闭」立刻收掉），
+ * 于是点另一个时，前一个的 document 监听根本收不到事件 —— 两个菜单会同时摊在屏幕上。
+ *
+ * 这里补一层捕获阶段的门：按下任一触发按钮，先把另一个收起。
+ * 只维护既有的 show / open / aria-expanded 三个状态，不动原有逻辑，也不新增状态。
+ * 捕获阶段先于按钮自身的冒泡处理器执行，所以「先关别人、再开自己」的顺序是确定的。
+ * ============================================================ */
+(function () {
+  'use strict';
+  const MENUS = [
+    { btn: 'btnExport', wrap: 'exportWrap', menu: 'exportMenu' },
+    { btn: 'btnOpen', wrap: 'openWrap', menu: 'openMenu' },
+  ];
+
+  function closeMenu(menuId, wrapId, btnId) {
+    const menu = document.getElementById(menuId);
+    if (!menu || !menu.classList.contains('show')) return;
+    menu.classList.remove('show');
+    const wrap = document.getElementById(wrapId);
+    if (wrap) wrap.classList.remove('open');
+    const btn = document.getElementById(btnId);
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+
+  MENUS.forEach((self) => {
+    const btn = document.getElementById(self.btn);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      MENUS.forEach((other) => {
+        if (other !== self) closeMenu(other.menu, other.wrap, other.btn);
+      });
+    }, true);
+  });
+})();
+
+/* ============================================================
+ * 「插入目录 / 移除目录」按钮状态
+ *
+ * 目录是派生的（源码只留一行 `<!-- TOC -->`），标题一改就自动跟上，
+ * 所以按钮不再是「更新」而是两件事：没有就插入、有了就移除。
+ * 旧文档里那种写死列表的整块（带 `<!-- /TOC -->`）会显示「转为自动目录」，
+ * 点一次收成一行标记。
+ * 状态写在 `data-toc` 上（insert / legacy / remove），方便断言，也不需要额外 CSS。
+ * ============================================================ */
+(function () {
+  'use strict';
+  const btn = document.getElementById('btnInsertTOC');
+  const editor = document.getElementById('editor');
+  if (!btn || !editor) return;
+  const label = btn.querySelector('span');
+  const LEGACY_RE = /<!-- TOC -->[\s\S]*?<!-- \/TOC -->/;
+  const AUTO_RE = /^[ \t]*<!-- TOC -->[ \t]*$/m;
+  const LABELS = {
+    insert: ['插入目录', '插入目录（随标题自动更新）'],
+    legacy: ['转为自动目录', '把写死的目录列表换成一行标记，之后随标题自动更新'],
+    remove: ['移除目录', '移除目录标记'],
+  };
+  let last = null;
+
+  function state() {
+    const v = editor.value;
+    if (LEGACY_RE.test(v)) return 'legacy';
+    if (AUTO_RE.test(v)) return 'remove';
+    return 'insert';
+  }
+
+  function sync() {
+    const s = state();
+    if (s === last) return; // 同一状态不重复写 DOM
+    last = s;
+    if (label) label.textContent = LABELS[s][0];
+    btn.title = LABELS[s][1];
+    btn.dataset.toc = s;
+  }
+
+  // 手打 / 粘贴走 input；生成目录本身不派发 input，所以再挂一次点击
+  // （注册在应用自身的处理器之后 → 读到的已是改过的 editor.value）
+  editor.addEventListener('input', sync);
+  btn.addEventListener('click', sync);
+  // 换文档、插入模板这类纯程序路径只重绘预览 ⇒ 顺带同步一次
+  const preview = document.getElementById('preview');
+  if (preview && window.MutationObserver) {
+    new MutationObserver(sync).observe(preview, { childList: true });
+  }
+  sync();
 })();
