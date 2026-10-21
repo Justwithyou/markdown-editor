@@ -55,7 +55,7 @@ mdtu-editor/
 ├── index.html        # 页面结构 + CDN 依赖引入 + 图标声明（496 行）
 ├── Markdown.ico      # 站点图标，六帧（16/32/48/64/128/256）；页头 / 标签页 / 桌面快捷方式共用
 ├── css/
-│   └── style.css     # 全部样式：2 套主题 + 布局 + 弹窗 + 水印 + 元数据 + 设备档预览 + 文件树抽屉 + 打开与导出下拉 + 打印 + 滚动条 + Mermaid 放大浮层 + 复制按钮的微信标识（1852 行）
+│   └── style.css     # 全部样式：2 套主题 + 布局 + 弹窗 + 水印 + 元数据 + 设备档预览 + 文件树抽屉 + 打开与导出下拉 + 打印 + 滚动条 + Mermaid 放大浮层 + 复制按钮的微信标识 + 顶栏 GitHub 入口（1912 行）
 ├── js/
 │   └── app.js        # 全部逻辑：解析/渲染/大纲/水印/模板/元数据/复制/导出/导出 PDF/设备档预览/文件夹模式/滚动条悬停放大/Mermaid 放大浮层 + 顶栏下拉互斥 + 派生目录（3450 行）
 ├── README.md         # 项目说明（GitHub 标准格式）
@@ -189,7 +189,7 @@ preview.innerHTML = html  ← 写入预览区
 | `#linksModal` | 760px (modal-lg) | 工具/开源项目导航（三 Tab） |
 | `#watermarkModal` | 680px (modal-md) | 水印设置（左表单 + 右预览） |
 
-另有悬浮组件：文档大纲 `.outline-panel`（右侧垂直居中悬浮）、**文件树抽屉 `.file-tree-panel`**（左侧，F5，见 7.10）、**抽屉入口 `.tree-peek`**（抽屉收起后浮在内容上层的 44×44 实心蓝圆球，按下变橙，可拖动、位置记在 `mdtu-tree-peek-pos`，只在「有工作区 + 抽屉收起」时出现）、Toast 提示 `.toast`。
+另有悬浮组件：目录大纲 `.outline-panel`（右侧垂直居中悬浮，高度固定视口 2/3）、**文件树抽屉 `.file-tree-panel`**（左侧，F5，见 7.10）、**抽屉入口 `.tree-peek`**（抽屉收起后浮在内容上层的 44×44 实心蓝圆球，按下变橙，可拖动、位置记在 `mdtu-tree-peek-pos`，只在「有工作区 + 抽屉收起」时出现）、Toast 提示 `.toast`。
 
 ### 5.4 滚动条（悬停放大）
 
@@ -254,7 +254,7 @@ preview.innerHTML = html  ← 写入预览区
 
 | 功能 | 说明 |
 |------|------|
-| 文档大纲 | 扫描 H1–H6，点击左（源码）右（预览）双栏联动跳转 |
+| 目录大纲 | 扫描 H1–H6，点击左（源码）右（预览）双栏联动跳转 |
 | 全屏预览 | 预览区全屏 + Esc 退出；进全屏即**锁定当前设备档**（设备档整组隐藏），iPad / APP 档不给页宽 |
 | 页宽调节 | 窄 680 / 中 880 / 宽 1100 / 超宽 1400 / 全屏宽（纸张感）；**仅 PC 档可用** |
 | 自动编号 | H1–H3 多级编号 |
@@ -372,7 +372,7 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 
 > **`data-page-node-id` 是什么？** 这份 `index.html` 一旦托管成 WorkBuddy 资料库的「页面」，页面平台就会给每个元素打上这个东西（内部叫 `pnid`），用于**节点级评论**与**「划词让 AI 改」的改动定位**（见内置 `library` 技能的 `page/edit-flow.md`）。它对运行没有任何影响，但会随 `preview.cloneNode(true)` 混进公众号与导出文件。**2026-10-13 已确认项目里零处读取它，整批清除了 312 处**；`stripEditorOnlyAttrs()`（app.js:919）留在 `copyToClipboard()`（app.js:942）与 `clonePreviewForExport()`（app.js:1117）两条克隆路径上做防御——文件若再被托管回资料库，属性会重新出现。ex-test 有一条「手动注入 pnid → 导出应剥掉」的用例锁着这段逻辑。
 
-**打印样式（`style.css:1755–1842`），六组规则：**
+**打印样式（`style.css:1758–1842`），六组规则：**
 
 1. **隐藏界面壳子**：`.app-header` / `.editor-panel` / `.resizer` / `.preview-toolbar` / `.outline-panel` / `.toast` / `.modal-overlay`
 2. **解除页面级锁定**：`html, body { height: auto; overflow: visible }`、`body { display: block }`、`.app-main { display: block; overflow: visible }`
@@ -381,7 +381,7 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 5. **`#preview { print-color-adjust: exact }`**：暗色主题按原色打印，不被浏览器「省墨」洗成白底
 6. **分页控制**：`pre` / `blockquote` / `table` / `.mermaid-rendered` / `.katex-display` / `.fm-block` 加 `break-inside: avoid`，`h1`–`h6` 加 `break-after: avoid`，`p, li` 设 `orphans: 2; widows: 2`
 
-另有 `@page { margin: 16mm }` 放在 `@media print` **之外**（`style.css:1755`，`@media print` 从 `:1759` 起）——`@page` 本身就是页面级 at-rule，放外面更直观，两条规则都有断言盯着。
+另有 `@page { margin: 16mm }` 放在 `@media print` **之外**（`style.css:1758`，`@media print` 从 `:1759` 起）——`@page` 本身就是页面级 at-rule，放外面更直观，两条规则都有断言盯着。
 
 **导出 Word 的兼容性子集（`buildWordHtml()`，app.js:1253）。** `application/msword` + `.doc` 套壳，本质仍是 HTML。Word / WPS 只认一小撮 CSS，因此：
 
@@ -508,7 +508,7 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 
 **编码判据（这也是 F5-b 关闭写回通道的依据，先在这里定下来）**：`decodeBytes()` 按「UTF-8 BOM → UTF-16 BOM → 严格 UTF-8（`TextDecoder('utf-8', { fatal: true })`）→ 失败即判非 UTF-8，回退 `TextDecoder('gbk')`」的顺序解码。BOM 会被剥掉，与 `FileReader.readAsText` 的既有行为一致；非 UTF-8 / UTF-16 只读预览并明确提示。
 
-**UI 复用**：抽屉刻意带上 `.outline-panel` 类——浮层骨架、`.show` 切换、**打印时隐藏**三件事都由那一套既有规则承担，`.file-tree-panel` 只把它从「右侧居中浮层」改成「左侧通栏抽屉」（毛玻璃 + 宽度拖拽，宽度记在 `mdtu-tree-width`）。文件行会占住折叠箭头那一列（空槽），否则同级目录与文件的图标 / 文字会左右错开。
+**UI 复用**：抽屉刻意带上 `.outline-panel` 类——浮层骨架、`.show` 切换、**打印时隐藏**三件事都由那一套既有规则承担，`.file-tree-panel` 只把它从「右侧居中浮层」改成「左侧居中的悬浮卡片」（毛玻璃 + 宽度拖拽，宽度记在 `mdtu-tree-width`）。**卡片高度恒为视口的 2/3**（`height: calc(100vh * 2 / 3)`，纯 CSS 的 `vh` 天生随窗口高度变化，不需要 JS 量尺寸或监听 `resize`），`top` 由 `100vh / 6 + (--header-height - --statusbar-height) / 2` 给出——上下各让出 1/6 视口，再把这 1/6 的中心对到「顶栏以下、状态栏以上」这块正文区的中点，上下留白才等宽；`bottom` 保持 `auto`，否则旧的「顶到底铺满」会与 `height` 打架。`.outline-panel` 的 `max-height: 50vh` 已随固定高度一并去掉（改为 `height: calc(100vh * 2 / 3)` + `top: calc(50% + (--header-height - --statusbar-height) / 2)`），所以两块浮层**同顶同高**、同时打开时上下沿齐平；长内容在 `.tree-body` / `.outline-body` 内部滚动。文件行会占住折叠箭头那一列（空槽），否则同级目录与文件的图标 / 文字会左右错开。
 
 **抽屉头部不再单占一行标题。** 早先的版本是 `.outline-header`「文件树…」+ 下面一行工作区名，两行都占地方，字号还和树内容不一致。现在头部只有一个 `.tree-head`：左边 `.tree-root`（工作区名，14px / 600 粗）+ `.tree-mode`（快照模式标签），右边 `.tree-head-actions` 里四个 28×28 的 `.tree-btn`（图标 16×16：全部展开 / 全部收起 / 换文件夹 / **收起**）。最后一个刻意**不用 `×`**，而是「面板 + 左向箭头」——`×` 在这个位置会被读成「关闭 / 删除」，可它做的只是把抽屉折回边缘，不是关掉工作区。**全树字号统一 14px**：`.tree-head` / `.tree-root` / `.tree-mode` / `.tree-row` / `.tree-note` / `.tree-empty` / `.tree-pick` 同一档，不再有大有小；树内图标同步放大（`ICON_CARET` 12 / `ICON_DIR` 15 / `ICON_FILE` 14），折叠箭头槽 14px、图标槽 16px、缩进步长 `depth * 15`——**字号、槽宽、步长是联动量，改一个要跟着改另外两个**，否则同级目录与文件的图标会重新错开。没有工作区时三个操作按钮 `hidden`（`.tree-btn[hidden]{display:none!important}`）。
 

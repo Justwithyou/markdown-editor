@@ -100,7 +100,7 @@ await navigator.clipboard.writeText(editor.value);
 
 B 落地时对原评估做了两处修正：① 中式排版与 KaTeX / Mermaid 的清晰度问题其实可接受——`scale` 取 2（受画布面积上限约束时自动降到 1.5 / 1），切缝用 `findBlankCut()` 找全白行，不会拦腰截断文字；② 「体积大」这一条通过 `getContext('2d', { alpha: false })` + `toDataURL('image/jpeg', 0.92)` 压下来了（10 页从 PNG 的 68 MB 降到约 1.1 MB）。**唯一不可回避的代价是文字不可检索**，这条已写进 Toast 与文档，并引导「要可检索就用打印」。超长文档撞上画布上限时会**明确拒绝并提示改用打印**，不交出截断文件。
 
-注意：`css/style.css` 当时**完全没有 `@media print` 规则**（全文 0 处），走方案 A 必须补上，否则打印结果会带上顶栏、工具栏和编辑区。落地时已补齐——`@page { margin: 16mm }` 放在 `style.css:1755`（媒体查询**之外**），`@media print { … }` 主体在 `style.css:1759` 起，整段到 `:1842`（文末另有 `.btn-wechat` 一条，不属于打印段）。
+注意：`css/style.css` 当时**完全没有 `@media print` 规则**（全文 0 处），走方案 A 必须补上，否则打印结果会带上顶栏、工具栏和编辑区。落地时已补齐——`@page { margin: 16mm }` 放在 `style.css:1758`（媒体查询**之外**），`@media print { … }` 主体在 `style.css:1762` 起，整段到 `:1842`（文末另有 `.btn-wechat` 一条，不属于打印段）。
 
 #### 4. 导出 Word — 两方案二选一
 
@@ -115,7 +115,7 @@ B 落地时对原评估做了两处修正：① 中式排版与 KaTeX / Mermaid 
 - [x] 抽出 `buildStandaloneHtml()`（规划里叫 `exportHtml()`）：主题样式 + hljs 样式 + KaTeX 样式内联，并先做 `url()` 绝对化
 - [x] 实现复制 Markdown（含 `file://` / 非安全上下文下的 `execCommand('copy')` 降级路径）
 - [x] 实现导出 HTML：**文件名按「元数据 `title` → 首个 H1 → `document`」取**（规划只写了「取首个 H1」），非法字符清洗 + 80 字符截断
-- [x] 补充 `@media print` 样式（`style.css:1755` `@page` + `:1759` `@media print`），实现**「打印」**（原方案 A）
+- [x] 补充 `@media print` 样式（`style.css:1758` `@page` + `:1759` `@media print`），实现**「打印」**（原方案 A）
 - [x] **新增「导出 PDF」下载链路**（原方案 B）：`exportPdfFile()` 离屏渲染 → A4 切片 → JPEG → `jsPDF` → `downloadBlob()`；两个库懒加载，不点不拉
 - [x] 实现导出 Word（方案 A：`application/msword` + `.doc` 套壳；`WORD_COMPAT_CSS` 用 `pt` 兜底，元数据面板降级为两列表格）
 - [x] 五个动作统一接入 Toast 成功/失败反馈；「导出 PDF」的 Toast 会说明产物是图片、要可检索请用「打印」
@@ -193,7 +193,7 @@ cd .workbuddy/tools && npm i && node ex-test.js
 
 | 问题 | 代码依据 |
 |------|----------|
-| ~~无打印样式~~ | **F1 已补齐**：`css/style.css:1755` `@page` + `:1759` `@media print` |
+| ~~无打印样式~~ | **F1 已补齐**：`css/style.css:1758` `@page` + `:1759` `@media print` |
 | 无障碍属性覆盖极少 | 仅「导出」「打开」两个下拉带了 `role="menu"` / `aria-haspopup` / `aria-expanded`（`app.js:1631` / `:1663` 同步 `aria-expanded`）；其余按钮与弹窗仍无 `aria-label` / `role="dialog"` |
 | 字体栈缺兜底 | 编辑器使用 `JetBrains Mono / Fira Code / SF Mono / Cascadia Code`，多数机器未安装，实际回退到系统默认，观感不一致 |
 | 提示无分级 | `showToast(msg, type)` 支持 `success` / `error`，但调用处几乎只用 success；失败路径（如 URL 采集失败）反馈不足 |
@@ -435,7 +435,7 @@ draft: false</h2>
 **5. 两条硬约束**
 
 - **不改动源码**：只影响预览与复制结果，textarea 里的原文一字不动（与水印的既有约定一致）。
-- **元数据不参与正文派生逻辑**：不计入字数统计、不进入文档大纲、不参与自动编号；且三档模式切换时统计数字不应跳动。
+- **元数据不参与正文派生逻辑**：不计入字数统计、不进入目录大纲、不参与自动编号；且三档模式切换时统计数字不应跳动。
 
 ### 技术方案
 
@@ -497,7 +497,7 @@ splitFrontMatter(源码) → marked.parse(body) → 前置元数据面板
 
 | 受影响功能 | 处理 |
 |---|---|
-| 文档大纲 | `getSourceHeadings()` 跳过首部 front matter 区间，预览侧面板内无 `<h*>`（那个假 `<h2>` 自然消失） |
+| 目录大纲 | `getSourceHeadings()` 跳过首部 front matter 区间，预览侧面板内无 `<h*>`（那个假 `<h2>` 自然消失） |
 | 字数统计 | `updateCounts()` 统计 `body`（不含元数据），状态栏另标注「元数据 N 项（未计入）」 |
 | 自动编号 | 元数据面板不参与，首行 H1 应从 1 开始而非被元数据顶掉 |
 | 插入目录 | `generateTOC()` 只在正文区间插目录，保证元数据始终留在文件最顶部 |
@@ -545,7 +545,7 @@ splitFrontMatter(源码) → marked.parse(body) → 前置元数据面板
 2. 源码（textarea 内容）与「复制 Markdown」输出**完全未被改动**
 3. `tags: [a, b]` 渲染为两个胶囊标签；`draft: false` 渲染为 `✗`；`date: 2026-09-20` 显示为 `2026-09-20` 而非 UTC 位移后的日期
 4. 键前的类型图标与值类型一致（文本 / 列表 / 数字 / 复选框 / 日期 / 时间 / 标签）
-5. 元数据不计入字数统计、不进入文档大纲、不参与自动编号；切换显示模式后统计数字不跳动
+5. 元数据不计入字数统计、不进入目录大纲、不参与自动编号；切换显示模式后统计数字不跳动
 6. YAML 语法错误时不吞正文：块被剥离并以「源码」形态回显 + 就地提示；闭合 `---` 缺失时按普通正文处理
 7. 三档模式（属性 / 源码 / 隐藏）切换即时生效，刷新后保持；旧存档值 `table` 自动迁移到 `panel`
 8. 复制到公众号后面板与标签样式完整保留（依赖内联样式，**待真实公众号后台人工确认**）；UI 标题行不出现在复制结果里
