@@ -1048,15 +1048,18 @@ body {
   }
 }
 
-/* ===== Floating Outline Panel ===== */
+/* ===== Floating Outline Panel =====
+   高度恒为视口 2/3（v 单位随窗口高度变，不用 JS 量），超出由 .outline-body 内部滚动；
+   top 把卡片中心对到正文区（顶栏以下、状态栏以上）的中点 —— 文件树抽屉用的是同一组
+   几何，两块浮层同时打开时上下沿齐平。 */
 .outline-panel {
   display: none;
   position: fixed;
-  top: 50%;
+  top: calc(50% + (var(--header-height) - var(--statusbar-height)) / 2);
   right: 16px;
   transform: translateY(-50%);
   width: 280px;
-  max-height: 50vh;
+  height: calc(100vh * 2 / 3);
   background: var(--bg-panel);
   border: 1px solid var(--border-color);
   border-radius: var(--radius);
@@ -1132,16 +1135,16 @@ body {
 
 /* ===== F5：文件树抽屉 =====
    刻意复用 .outline-panel 这套浮层骨架：display:none / .show 切换 / 打印时隐藏
-   三件事都由既有规则承担，这里只把它从「右侧居中浮层」改成「左侧通栏抽屉」。
-   毛玻璃只是叠在布局之上的观感，不参与任何尺寸计算。 */
+   三件事都由既有规则承担，这里只把它从「右侧居中浮层」改成「左侧居中的悬浮卡片」。
+   高度同为视口 2/3，顶部留 1/6 + (顶栏 - 状态栏)/2 —— 与目录大纲浮层同顶同高。 */
 .file-tree-panel {
   left: 12px;
   right: auto;
-  top: calc(var(--header-height) + 12px);
-  bottom: 12px;
+  top: calc(100vh / 6 + (var(--header-height) - var(--statusbar-height)) / 2);
+  bottom: auto;
   transform: none;
   width: var(--ftw, 264px);
-  max-height: none;
+  height: calc(100vh * 2 / 3);   /* 视口 2/3；.outline-panel 已不设 max-height，不会被钳 */
   background: rgba(255, 255, 255, .82);
   backdrop-filter: blur(14px) saturate(1.7);
   -webkit-backdrop-filter: blur(14px) saturate(1.7);
@@ -1849,4 +1852,64 @@ body {
 .btn-wechat {
   flex: 0 0 auto;
   opacity: .85;
+}
+
+/* ===== 顶栏 GitHub 入口 · 文件树行改走「目录大纲」那套交互语言 =====
+   两块都是对既有结构的**观感调整**，所以统一追加在末尾：原地改会挪动上面上百处
+   `style.css:NNN` 行号引用，末尾新增既不动老规则，也让这轮改动集中在一处可查。
+
+   1) 顶栏：图标 + 名词之后追加一枚仓库入口。盒子尺寸与 .logo-icon 同高（26×26），
+      悬停才上底色 —— 常态它应该像标题的注脚，而不是又一个主按钮。
+   2) 文件树：此前只有「底色变化」，和右侧大纲「左缘一根 3px 主题色竖条 + 文字染色」
+      不是一套语言。这里照搬大纲的交互态，竖条用**透明边框占位**（与 .outline-item
+      的 border-left 同一手法），常态不占额外宽度、切换时不产生位移。 */
+.logo-repo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: background .15s, color .15s;
+}
+
+.logo-repo:hover,
+.logo-repo:focus-visible {
+  background: var(--bg-hover);
+  color: var(--accent);
+  outline: none;
+}
+
+.logo-repo svg {
+  display: block;
+}
+
+/* 树行的缩进是 JS 内联的 padding-left（层级 × 15px），所以这里**只加边框不改 padding**：
+   缩进步长、以及「文件行占住折叠箭头空槽 / 同级图标与文字对齐」这两组关系都不受影响，
+   内容整体右移 3px 与头部 .tree-head 的 12px 左内边距刚好接上。 */
+.tree-row,
+.tree-note {
+  border-left: 3px solid transparent;
+}
+
+.tree-row {
+  transition: background .15s ease, color .15s ease, border-left-color .15s ease;
+}
+
+/* 与 .outline-item:hover 一致：底色 + 文字染色 + 竖条点亮 */
+.tree-row:hover {
+  color: var(--accent);
+  border-left-color: var(--accent);
+}
+
+.tree-row:hover .tree-ico {
+  color: var(--accent);
+}
+
+/* 选中态补上竖条（底色 / 字色 / 字重沿用原有 .tree-row.active） */
+.tree-row.active {
+  border-left-color: var(--accent);
 }
