@@ -483,10 +483,20 @@
   <div class="outline-panel" id="outlinePanel">
     <div class="outline-header">
       <span>目录大纲</span>
-      <button class="outline-close" id="outlineClose">&times;</button>
+      <div class="outline-actions">
+        <button class="outline-btn" id="outlineCollapse" title="收起为悬浮球（大纲保持打开）" aria-label="收起目录大纲">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+        </button>
+        <button class="outline-close" id="outlineClose" title="关闭目录大纲" aria-label="关闭目录大纲">&times;</button>
+      </div>
     </div>
     <div class="outline-body" id="outlineBody"></div>
   </div>
+
+  <!-- 目录大纲收起后的悬浮球：点它把面板放回来（视觉与文件树的 #treePeek 同一套） -->
+  <button class="tree-peek outline-peek" id="outlinePeek" hidden title="展开目录大纲" aria-label="展开目录大纲">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><line x1="4" y1="6" x2="20" y2="6"/><line x1="7" y1="12" x2="20" y2="12"/><line x1="10" y1="18" x2="20" y2="18"/></svg>
+  </button>
 
   <!-- Toast -->
   <div class="toast" id="toast"></div>

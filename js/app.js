@@ -3448,3 +3448,32 @@ img { max-width: 100%; }`;
   }
   sync();
 })();
+
+/* ===== 目录大纲：收起为悬浮球 / 点球展开 =====
+   「收起」≠「关闭」：面板摘掉 .show 藏起来，大纲仍是打开态（顶栏「大纲」保持 active），
+   正文重渲染照旧刷新这块隐藏面板里的条目，放回来时内容是最新的。
+   三条出口全在这里收口，不改主逻辑（toggleOutline / outlineVisible）：
+   - 头部「收起」→ 摘 .show、露出悬浮球
+   - 点悬浮球 → 加回 .show、球藏起来
+   - 「×」或顶栏「大纲」→ 真正关闭，球一并收掉（监听注册在主逻辑之后，
+     执行时读到的已是切换后的 DOM 状态，不用复刻它的判断）
+   折叠状态**不持久化**：下次打开页面仍是完整面板，不会「一进来只剩一个球」。 */
+(function () {
+  const panel = document.getElementById('outlinePanel');
+  const collapseBtn = document.getElementById('outlineCollapse');
+  const closeBtn = document.getElementById('outlineClose');
+  const peek = document.getElementById('outlinePeek');
+  const topBtn = document.getElementById('btnOutline');
+  if (!panel || !collapseBtn || !closeBtn || !peek || !topBtn) return;
+
+  function setCollapsed(on) {
+    panel.classList.toggle('show', !on);
+    peek.hidden = !on;
+  }
+  collapseBtn.addEventListener('click', function () { setCollapsed(true); });
+  peek.addEventListener('click', function () { setCollapsed(false); });
+
+  // 下面两个入口都是「真正关闭」：球跟着消失，否则会出现「已关闭却仍有个球」的假态
+  closeBtn.addEventListener('click', function () { peek.hidden = true; });
+  topBtn.addEventListener('click', function () { peek.hidden = true; });
+})();

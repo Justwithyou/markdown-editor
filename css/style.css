@@ -1913,3 +1913,41 @@ body {
 .tree-row.active {
   border-left-color: var(--accent);
 }
+
+/* ===== 目录大纲：头部操作按钮 + 收起后的悬浮球 =====
+   「收起」不是「关闭」：面板摘掉 .show 藏起来，大纲本身仍是打开态（顶栏「大纲」保持 active），
+   正文渲染照旧刷新这块隐藏的面板内容；点右缘的悬浮球就能放回来。
+   悬浮球直接复用 .tree-peek 的形状 / 实心主题蓝 / hover / [hidden]，这里只把它从
+   「贴左缘、可拖动」改成「贴右缘、固定」—— 球心取与面板相同的 top，
+   收起前后视觉位置不跳（面板中心 = 球心）。 */
+.outline-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.outline-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.outline-btn:hover {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+.outline-peek {
+  left: auto;
+  right: 16px;
+  top: calc(50% + (var(--header-height) - var(--statusbar-height)) / 2);
+  transform: translateY(-50%);
+  /* 不参与拖动，别用 grab 误导成「能拖」 */
+  cursor: pointer;
+}
