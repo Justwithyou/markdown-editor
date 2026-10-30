@@ -1713,6 +1713,7 @@ img { max-width: 100%; }`;
 
   // URL Fetch
   $('#btnUrlFetch').addEventListener('click', () => {
+    setUrlHint('');
     $('#urlModal').classList.add('show');
     $('#urlInput').focus();
   });
@@ -1720,25 +1721,211 @@ img { max-width: 100%; }`;
   $('#urlModalClose').addEventListener('click', () => $('#urlModal').classList.remove('show'));
   $('#urlCancel').addEventListener('click', () => $('#urlModal').classList.remove('show'));
 
-  $('#urlConfirm').addEventListener('click', async () => {
-    const url = $('#urlInput').value.trim();
-    if (!url) return;
-    showToast('正在采集内容...');
+  // ===== URL 采集的取数链路 =====
+  //
+  // 旧实现只打一条 allorigins，而且**完全不校验返回**：代理被限流时回的是一个空 body
+  // 或 nginx 错误页，`htmlToMarkdown()` 于是产出 ''（或一句 "500 Internal Server Error"），
+  // 编辑器被清空、提示却写着「采集成功」—— 这就是「提示成功但页面没内容」的来源。
+  //
+  // 现在的顺序是「取 → 校验 → 才覆盖」：
+  //   ① **先直连**。不少静态站（GitHub Pages / Cloudflare Pages / 各类静态博客）本身就带
+  //      `Access-Control-Allow-Origin: *`，跨域直接放行 —— 这类页面根本不需要转发，
+  //      而公共转发服务大多在境外、在受限网络里一个都连不上（实测 r.jina.ai / allorigins
+  //      在不开代理时全是 Failed to fetch，反倒是目标站 200）。直连既最快，也不经过第三方。
+  //   ② 直连被跨域挡住时才并行打三条转发通道，谁先给出合格正文用谁，其余立刻 abort。
+  // 全部不过关就整体算失败，弹窗、网址、原文档原样留着。
+  const URL_PROVIDERS = [
+    // 直连：不做任何包装，直接把目标地址交给 fetch
+    { name: '直连', kind: 'html', timeout: 15000, direct: true, url: (u) => u },
+    // Jina Reader 直接回 Markdown，且自带无头渲染（SPA、微信公众号这类纯 JS 页面也抓得到）
+    { name: 'Jina Reader', kind: 'markdown', timeout: 20000, url: (u) => 'https://r.jina.ai/' + u },
+    { name: 'AllOrigins', kind: 'html', timeout: 12000, url: (u) => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u) },
+    { name: 'CodeTabs', kind: 'html', timeout: 12000, url: (u) => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(u) },
+  ];
+
+  let urlBusy = false;
+
+  // 失败原因不能只靠 toast —— 2.5 秒就没了。弹窗里那行说明文字就是状态位：
+  // 平时是用法提示，采集时显示进度，失败后留下完整原因供人照着改。
+  const URL_HINT = '输入网页 URL，将自动提取 Markdown 内容';
+  function setUrlHint(msg, isError) {
+    const el = $('#urlHint');
+    if (!el) return;
+    el.classList.toggle('is-error', !!isError);
+    el.textContent = msg || URL_HINT;
+  }
+
+  function setUrlBusy(busy, label) {
+    urlBusy = busy;
+    const btn = $('#urlConfirm');
+    btn.disabled = busy;
+    btn.textContent = busy ? (label || '采集中…') : '采集';
+    $('#urlInput').disabled = busy;
+  }
+
+  async function fetchText(url, timeout, label, extSignal) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), timeout);
+    const onAbort = () => ac.abort();
+    if (extSignal) extSignal.addEventListener('abort', onAbort);
     try {
-      const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-      const response = await fetch(proxyUrl);
-      const html = await response.text();
-      // Simple HTML to Markdown conversion
-      const md = htmlToMarkdown(html);
-      editor.value = md;
-      renderMarkdown();
-      saveContent();
-      showToast('采集成功', 'success');
+      const res = await fetch(url, { signal: ac.signal, credentials: 'omit' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return await res.text();
     } catch (err) {
-      showToast('采集失败：' + err.message, 'error');
+      if (err && err.name === 'AbortError') {
+        throw new Error(extSignal && extSignal.aborted ? '已取消' : '请求超时');
+      }
+      // 浏览器的原文是「Failed to fetch」——对用户来说是噪音，换成能行动的说法。
+      // 直连这一档的 TypeError 还有第二种可能：目标站没发 CORS 头，被浏览器拦下。
+      if (err instanceof TypeError) {
+        throw new Error(label === '直连' ? '跨域被拒或网络不可达' : '网络不可达');
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+      if (extSignal) extSignal.removeEventListener('abort', onAbort);
     }
+  }
+
+  // 代理自己的报错（JSON / nginx 错误页）不能当成正文
+  function looksLikeProxyError(text) {
+    const t = String(text || '').trim();
+    if (!t) return true;
+    if (t.length < 4000 && /^\{[\s\S]*"(error|message)"\s*:/.test(t)) return true;
+    if (t.length < 600 && /^[45]\d\d\s+\S/.test(t)) return true;
+    return false;
+  }
+
+  function unwrapProxyPayload(body) {
+    const t = String(body || '').trim();
+    if (!t.startsWith('{')) return body;
+    try {
+      const j = JSON.parse(t);
+      if (j && typeof j.contents === 'string') return j.contents;
+      if (j && j.error) throw new Error('代理返回错误');
+      return body;
+    } catch (err) {
+      if (err instanceof SyntaxError) return body; // 不是 JSON，按原样往下走
+      throw err;
+    }
+  }
+
+  // Jina Reader 会在正文前压一小段元信息（Title / URL Source / Markdown Content），去掉它
+  function cleanReaderMarkdown(text) {
+    let t = String(text || '');
+    if (/^\s*Title:/.test(t)) {
+      const m = t.match(/^[\s\S]{0,800}?\nMarkdown Content:\s*\n/);
+      if (m) t = t.slice(m[0].length);
+    }
+    return t.replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  // 正文的「像样」标准：去掉空白与 Markdown 标记后仍有 20 个字符。
+  // 低于这个量级基本是空壳页 / 错误页，宁可报失败也不要拿它覆盖用户文档。
+  const isMeaningfulMd = (s) => String(s || '').replace(/[\s#>*_`\-|[\]]/g, '').length >= 20;
+
+  // 一个通道 → 一段 Markdown（不合格就抛错，交给上层决定换源）
+  function providerToMarkdown(p, body, href) {
+    if (p.kind === 'markdown') {
+      if (looksLikeProxyError(body)) throw new Error('返回的不是正文');
+      const md = cleanReaderMarkdown(body);
+      if (!isMeaningfulMd(md)) throw new Error('未提取到正文');
+      return md;
+    }
+    const html = unwrapProxyPayload(body);
+    if (looksLikeProxyError(html)) throw new Error('返回的不是正文');
+    const md = htmlToMarkdown(html, href);
+    if (!isMeaningfulMd(md)) throw new Error('未提取到正文');
+    return md;
+  }
+
+  // 三条转发通道并行赛跑：谁先给出合格正文就用谁，其余立刻 abort。
+  // 串行的话，遇到三个都挂的网络要白等一分多钟；并行最坏只等最慢那条。
+  function raceProxies(href, reasons) {
+    const list = URL_PROVIDERS.filter((p) => !p.direct);
+    const ctrls = list.map(() => new AbortController());
+    return new Promise((resolve, reject) => {
+      let left = list.length;
+      let settled = false;
+      list.forEach((p, i) => {
+        (async () => {
+          const body = await fetchText(p.url(href), p.timeout, p.name, ctrls[i].signal);
+          return providerToMarkdown(p, body, href);
+        })().then((md) => {
+          if (settled) return;
+          settled = true;
+          ctrls.forEach((c) => c.abort()); // 赢家已定，别让输家继续占着公共服务的配额
+          resolve(md);
+        }).catch((err) => {
+          if (settled) return;
+          reasons.push(`${p.name} ${err && err.message ? err.message : '请求失败'}`);
+          if (--left === 0) {
+            reject(new Error(`全部通道均未取到正文 → ${reasons.join(' / ')}。`
+              + '直连被拒多为目标站未开 CORS；其余通道在境外，需能出境的网络。'));
+          }
+        });
+      });
+    });
+  }
+
+  async function collectFromUrl(raw) {
+    const url = /^https?:\/\//i.test(raw) ? raw : 'https://' + raw;
+    let parsed;
+    try { parsed = new URL(url); } catch (err) { throw new Error('网址格式不正确'); }
+    if (!/^https?:$/.test(parsed.protocol)) throw new Error('只支持 http / https 网址');
+
+    const reasons = [];
+
+    // ① 直连优先
+    setUrlBusy(true, '正在直连…');
+    setUrlHint('正在直连抓取…');
+    const direct = URL_PROVIDERS.find((p) => p.direct);
+    try {
+      const body = await fetchText(parsed.href, direct.timeout, direct.name);
+      return providerToMarkdown(direct, body, parsed.href);
+    } catch (err) {
+      reasons.push(`${direct.name} ${err && err.message ? err.message : '请求失败'}`);
+    }
+
+    // ② 直连被跨域挡住 → 转发通道并行赛跑
+    setUrlBusy(true, '正在换源…');
+    setUrlHint('目标站不允许跨域，正在换用转发通道…');
+    return raceProxies(parsed.href, reasons);
+  }
+
+  $('#urlConfirm').addEventListener('click', async () => {
+    if (urlBusy) return;
+    const raw = $('#urlInput').value.trim();
+    if (!raw) {
+      showToast('请先输入网址', 'error');
+      $('#urlInput').focus();
+      return;
+    }
+    // 先问再抓：等十几秒抓完了才问「要不要覆盖」，等于白等
+    if (editor.value.trim() && !confirm('采集会替换当前内容，是否继续？')) return;
+
+    showToast('正在采集内容…');
+    let md = '';
+    try {
+      md = await collectFromUrl(raw);
+    } catch (err) {
+      setUrlBusy(false);
+      // 完整原因留在弹窗里（toast 只有 2.5 秒）；toast 只负责把人叫回来
+      setUrlHint('采集失败 — ' + (err && err.message ? err.message : '未知错误'), true);
+      showToast('采集失败（原因见弹窗）', 'error');
+      return; // 弹窗与网址都留着，改一下就能重试；原文档一个字没动
+    }
+    setUrlBusy(false);
+    setUrlHint('');
+
+    editor.value = md;
+    renderMarkdown();
+    saveContent();
+    editor.scrollTop = 0;
     $('#urlModal').classList.remove('show');
     $('#urlInput').value = '';
+    showToast(`采集成功，共 ${md.length} 字`, 'success');
   });
 
   $('#urlInput').addEventListener('keydown', (e) => {
@@ -2124,77 +2311,160 @@ img { max-width: 100%; }`;
   });
 
   // ===== HTML to Markdown =====
-  function htmlToMarkdown(html) {
-    // Create a temp element to parse HTML
+  //
+  // 采集链路的最后一环。相比初版补了三条：
+  //   1. 相对链接 / 图片按**源站地址**补全（初版取 `a.href`，那是以本地页面为 base 解析的，
+  //      写进正文全是 `file:///D:/…` 的死链）；
+  //   2. 正文容器按体积挑最大的那个，且体积不足整页 30% 就退回整页 ——
+  //      侧栏里一个空的 `.content` 占位就能把整篇文章顶掉，产出空串；
+  //   3. 文本节点里的源缩进、空行统一折叠，不再把 HTML 的换行缩进原样灌进 Markdown。
+  function htmlToMarkdown(html, baseUrl) {
     const temp = document.createElement('div');
     temp.innerHTML = html;
 
-    // Remove scripts and styles
-    temp.querySelectorAll('script, style, nav, footer, header, aside, iframe').forEach((el) => el.remove());
+    // 这些标签里的文字都不是正文，先整棵摘掉（含 title / meta，否则页面标题会混进第一段）
+    temp.querySelectorAll('script, style, link, meta, title, noscript, template, iframe, svg, canvas, nav, footer, header, aside, form, button, select, textarea').forEach((el) => el.remove());
 
-    // Try to get main content
-    const article = temp.querySelector('article') || temp.querySelector('main') || temp.querySelector('.content') || temp.querySelector('.post') || temp;
+    const abs = (u) => {
+      const s = String(u || '').trim();
+      if (!s || /^(data:|blob:|mailto:|tel:|javascript:|#)/i.test(s)) return s;
+      try { return new URL(s, baseUrl || document.baseURI).href; } catch (e) { return s; }
+    };
+    const textLen = (el) => (el.textContent || '').replace(/\s/g, '').length;
+    const flat = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+
+    // 正文容器：先试「紧」容器（article / 正文类 class），都够不上量再退到 main / 整页。
+    // 只看「谁体积最大」是错的 —— `main` 通常把面包屑、页内目录、上下页导航一起包进来，
+    // 一旦命中，这些噪声就跟着进了正文（实测某书站正文 3.7 万字里混进「全书目录 / 本章内容」）。
+    // 同时用「至少占整页 30%」这道量，避免误命中侧栏里一个空的摘要块。
+    const TIGHT = 'article, [role="article"], .prose, .markdown-body, .post-content, .article-content, .entry-content, #js_content, .rich_media_content';
+    const WIDE = 'main, [role="main"], #content, .content, .post';
+    const pageLen = textLen(temp);
+    const pickContainer = (sel) => {
+      let best = null;
+      let bestLen = -1;
+      temp.querySelectorAll(sel).forEach((el) => {
+        const n = textLen(el);
+        if (n > bestLen) { bestLen = n; best = el; }
+      });
+      return best && bestLen >= pageLen * 0.3 ? best : null;
+    };
+    const article = pickContainer(TIGHT) || pickContainer(WIDE) || temp;
 
     let md = '';
 
-    function processNode(node, depth = 0) {
+    // 把子树单独转成 Markdown 再拼回去（标题、链接、列表项都要用）
+    function inner(node) {
+      const save = md;
+      md = '';
+      processNode(node);
+      const s = md;
+      md = save;
+      return s;
+    }
+
+    function processNode(node) {
       node.childNodes.forEach((child) => {
-        if (child.nodeType === Node.TEXT_NODE) {
-          md += child.textContent;
-        } else if (child.nodeType === Node.ELEMENT_NODE) {
-          const tag = child.tagName.toLowerCase();
-          switch (tag) {
-            case 'h1': md += `\n# ${child.textContent.trim()}\n\n`; break;
-            case 'h2': md += `\n## ${child.textContent.trim()}\n\n`; break;
-            case 'h3': md += `\n### ${child.textContent.trim()}\n\n`; break;
-            case 'h4': md += `\n#### ${child.textContent.trim()}\n\n`; break;
-            case 'h5': md += `\n##### ${child.textContent.trim()}\n\n`; break;
-            case 'p': md += '\n'; processNode(child, depth + 1); md += '\n\n'; break;
-            case 'br': md += '\n'; break;
-            case 'strong': case 'b': md += '**'; processNode(child, depth + 1); md += '**'; break;
-            case 'em': case 'i': md += '*'; processNode(child, depth + 1); md += '*'; break;
-            case 'del': case 's': md += '~~'; processNode(child, depth + 1); md += '~~'; break;
-            case 'a': md += `[${child.textContent}](${child.href})`; break;
-            case 'img': md += `![${child.alt || ''}](${child.src})`; break;
-            case 'code':
-              if (child.parentElement && child.parentElement.tagName.toLowerCase() === 'pre') {
-                const lang = child.className.match(/language-(\w+)/);
-                md += `\n\`\`\`${lang ? lang[1] : ''}\n${child.textContent}\n\`\`\`\n\n`;
-              } else {
-                md += `\`${child.textContent}\``;
-              }
-              break;
-            case 'pre': processNode(child, depth + 1); break;
-            case 'blockquote': md += '\n'; Array.from(child.children).forEach((c) => { md += `> ${c.textContent}\n`; }); md += '\n'; break;
-            case 'ul':
-              md += '\n';
-              child.querySelectorAll(':scope > li').forEach((li) => { md += `- ${li.textContent.trim()}\n`; });
-              md += '\n';
-              break;
-            case 'ol':
-              md += '\n';
-              let i = 1;
-              child.querySelectorAll(':scope > li').forEach((li) => { md += `${i++}. ${li.textContent.trim()}\n`; });
-              md += '\n';
-              break;
-            case 'hr': md += '\n---\n\n'; break;
-            case 'table':
-              md += '\n';
-              child.querySelectorAll('tr').forEach((tr, ri) => {
-                const cells = Array.from(tr.querySelectorAll('th, td')).map((c) => c.textContent.trim());
-                md += `| ${cells.join(' | ')} |\n`;
-                if (ri === 0) md += `| ${cells.map(() => '---').join(' | ')} |\n`;
-              });
-              md += '\n';
-              break;
-            default: processNode(child, depth + 1);
+        if (child.nodeType === 3) {
+          md += child.textContent.replace(/\s+/g, ' ');
+          return;
+        }
+        if (child.nodeType !== 1) return;
+
+        const tag = child.tagName.toLowerCase();
+        switch (tag) {
+          case 'h1': case 'h2': case 'h3': case 'h4': case 'h5': case 'h6': {
+            const level = Number(tag[1]);
+            const text = flat(inner(child));
+            if (text) md += `\n${'#'.repeat(level)} ${text}\n\n`;
+            break;
           }
+          case 'p': case 'div': case 'section': case 'article': case 'main': case 'figure': case 'figcaption': {
+            md += '\n';
+            processNode(child);
+            md += '\n\n';
+            break;
+          }
+          case 'br': md += '\n'; break;
+          case 'strong': case 'b': md += '**'; processNode(child); md += '**'; break;
+          case 'em': case 'i': md += '*'; processNode(child); md += '*'; break;
+          case 'del': case 's': case 'strike': md += '~~'; processNode(child); md += '~~'; break;
+          case 'mark': md += '=='; processNode(child); md += '=='; break;
+          case 'a': {
+            const href = abs(child.getAttribute('href'));
+            const label = flat(inner(child));
+            if (!href || href === '#') { md += label; break; }
+            // 纯图片链接 / 无文字链接：直接给裸地址，比一个空方括号有用
+            md += (label && label !== href) ? `[${label}](${href})` : `<${href}>`;
+            break;
+          }
+          case 'img': {
+            const src = abs(child.getAttribute('src') || child.getAttribute('data-src')
+              || child.getAttribute('data-original') || child.getAttribute('data-lazy-src'));
+            if (!src) break;
+            md += `![${flat(child.getAttribute('alt'))}](${src})`;
+            break;
+          }
+          case 'code': {
+            // 块级代码由 <pre> 统一出块，这里再吐一次就会重复
+            if (child.parentElement && child.parentElement.tagName.toLowerCase() === 'pre') break;
+            const raw = child.textContent;
+            // 行内代码里出现反引号时换更长的定界符，否则会提前闭合
+            const fence = raw.includes('`') ? '``' : '`';
+            md += `${fence}${raw}${fence}`;
+            break;
+          }
+          case 'pre': {
+            const codeEl = child.querySelector('code') || child;
+            const cls = `${child.className || ''} ${codeEl.className || ''}`;
+            const lang = (cls.match(/(?:language|lang)-([\w+#-]+)/) || [])[1] || '';
+            let code = codeEl.textContent.replace(/\s+$/, '');
+            const fence = code.includes('```') ? '````' : '```';
+            md += `\n${fence}${lang}\n${code}\n${fence}\n\n`;
+            break;
+          }
+          case 'blockquote': {
+            const body = inner(child).replace(/\n{3,}/g, '\n\n').trim();
+            if (body) md += '\n' + body.split('\n').map((l) => (l ? '> ' + l : '>')).join('\n') + '\n\n';
+            break;
+          }
+          case 'ul': case 'ol': {
+            const ordered = tag === 'ol';
+            let n = ordered ? (parseInt(child.getAttribute('start'), 10) || 1) : 0;
+            const items = [];
+            Array.from(child.children).forEach((li) => {
+              if (li.tagName.toLowerCase() !== 'li') return;
+              // 子列表交给递归，缩进两级后正好落在父项下面
+              const body = inner(li).replace(/\n{3,}/g, '\n').trim();
+              if (!body) return;
+              const marker = ordered ? `${n++}.` : '-';
+              items.push(`${marker} ${body.replace(/\n/g, '\n  ')}`);
+            });
+            if (items.length) md += '\n' + items.join('\n') + '\n\n';
+            break;
+          }
+          case 'hr': md += '\n---\n\n'; break;
+          case 'table': {
+            const rows = Array.from(child.rows || []);
+            const lines = [];
+            rows.forEach((tr) => {
+              const cells = Array.from(tr.cells).map((c) => flat(c.textContent).replace(/\|/g, '\\|'));
+              lines.push(`| ${cells.join(' | ')} |`);
+              if (lines.length === 1) lines.push(`| ${cells.map(() => '---').join(' | ')} |`);
+            });
+            if (lines.length > 2) md += '\n' + lines.join('\n') + '\n\n';
+            break;
+          }
+          default: processNode(child);
         }
       });
     }
 
     processNode(article);
-    return md.replace(/\n{3,}/g, '\n\n').trim();
+    return md
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
   }
 
   // ===== Persistence =====

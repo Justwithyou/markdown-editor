@@ -196,7 +196,7 @@ cd .workbuddy/tools && npm i && node ex-test.js
 | ~~无打印样式~~ | **F1 已补齐**：`css/style.css:1758` `@page` + `:1759` `@media print` |
 | 无障碍属性覆盖极少 | 仅「导出」「打开」两个下拉带了 `role="menu"` / `aria-haspopup` / `aria-expanded`（`app.js:1631` / `:1663` 同步 `aria-expanded`）；其余按钮与弹窗仍无 `aria-label` / `role="dialog"` |
 | 字体栈缺兜底 | 编辑器使用 `JetBrains Mono / Fira Code / SF Mono / Cascadia Code`，多数机器未安装，实际回退到系统默认，观感不一致 |
-| 提示无分级 | `showToast(msg, type)` 支持 `success` / `error`，但调用处几乎只用 success；失败路径（如 URL 采集失败）反馈不足 |
+| 提示无分级 | `showToast(msg, type)` 支持 `success` / `error`，但调用处几乎只用 success；失败路径反馈不足。**URL 采集已修**：成功带字数、失败带具体原因（通道名 + HTTP 状态 / 未提取到正文） |
 | 危险操作确认覆盖不全 | 仅「打开文件」「清空内容」有 `confirm()`（app.js:1689 / 1706），删除模板等无确认 |
 | Esc 关闭弹窗未统一 | 仅「水印」弹窗实现；模板 / URL / 更多工具三个弹窗缺失 |
 | 无查找替换 | — |

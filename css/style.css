@@ -1951,3 +1951,19 @@ body {
   /* 不参与拖动，别用 grab 误导成「能拖」 */
   cursor: pointer;
 }
+
+/* ===== URL 采集：进行中态 ===== */
+/* 采集是一条会跑十几秒的链路，按钮必须自证「正在做事」，也必须挡住连点重复发起 */
+.btn-primary:disabled {
+  opacity: .55;
+  cursor: progress;
+}
+#urlInput:disabled {
+  background: var(--bg-hover);
+  cursor: progress;
+}
+
+/* 采集失败时，弹窗里那行说明文字变成错误态：原因留在这儿，不用去追一闪而过的 toast */
+.modal-hint.is-error {
+  color: #e5484d;
+}
