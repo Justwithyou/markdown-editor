@@ -16,6 +16,7 @@
 - [F4 · 文档元数据（Front Matter）解析与展示](#f4--文档元数据front-matter解析与展示)
 - [F5 · 文件夹模式（打开整个文件夹并写回磁盘）](#f5--文件夹模式打开整个文件夹并写回磁盘)
 - [F6 · 预览模式（设备档）](#f6--预览模式设备档)
+- [F7 · PWA 安装与 .md 文件关联](#f7--pwa-安装与-md-文件关联)
 - [非目标](#非目标)
 - [维护约定](#维护约定)
 - [参考链接](#参考链接)
@@ -32,6 +33,7 @@
 | F4 | 文档元数据（Front Matter）解析与展示 | P1 | ✅ | 无 | 小～中 |
 | F5 | 文件夹模式（打开整个文件夹并写回磁盘） | P1 | 🟦 部分 | 无（建议先做只读的 F5-a） | 中～大 |
 | F6 | 预览模式（设备档） | P1 | ✅ | 无 | 小～中 |
+| F7 | PWA 安装与 `.md` 文件关联 | P0 | ✅ | 需 HTTPS（Pages 或本地服务） | 小 |
 
 > **F3 标记为「🟦 部分」的原因**：2026-10-13 已落地**主题精简**（4 套 → 2 套：GitHub / 晴空蓝），并完成**两个外部对标站点的可行性调研**（独立文档 [F3-THEME-RESEARCH.md](./F3-THEME-RESEARCH.md)）；但主题体系的架构重构（内联样式、token → CSS、代码主题独立切换）尚未开始。
 
@@ -881,6 +883,72 @@ F5 **不越界**：纯本地、不碰后端，与「非目标」中的「云同�
 
 ---
 
+## F7 · PWA 安装与 .md 文件关联
+
+### 背景
+
+产品的核心承诺是「打开一篇 md 就能读、就能改」，但现状的入口是三步：**开网页 → 点「打开」→ 在系统文件框里找文件**。更根本的是，右键任意 `.md` 的「打开方式」里从来没有这个产品——它在操作系统里没有一个身份。
+
+这两件事其实是同一个根因：纯静态网页不写系统注册表。三条可能的路线：
+
+| 路线 | 代表产品 | 拿到身份的方式 | 代价 |
+|------|---------|--------------|------|
+| 打包成壳 | Typora / Obsidian / MarkText | 安装包写注册表、右键菜单、单实例 | 引入构建链、80MB+ 体积、签名与更新器 |
+| 换入口模型 | Obsidian（vault） | 不抢关联，用「库 + 最近文件」把入口搬进应用 | 要放弃「双击任意 md」，且需要后端或自有目录约定 |
+| **PWA** | Excalidraw / Photopea | 由浏览器代理写注册表（`HKCU`，免提权） | 必须先装一次；仅桌面 Chromium |
+
+本项目选第三条：**零构建、零依赖、零后端这三条不能破**，而 PWA 恰好只要求两个静态文件。
+
+### 技术方案
+
+**① 可安装性**（`manifest.json`）：`display: standalone` + `start_url`/`scope`/`id` 均为 `./` + 192/512 两份 PNG。相对路径是为了让 GitHub Pages 的子路径（`/markdown-editor/`）和本地根路径都成立；`id` 显式写死，否则以后改 `start_url` 会被浏览器当成新应用而不是升级。
+
+**② 文件关联**（`file_handlers`）：`action: "./"`（静态站没有路由，写 `/open` 会 404）、`accept: text/markdown → .md/.markdown/.mdx`。**刻意不含 `.txt`**——那会顶掉系统默认文本编辑器。安装时 Chromium 把这份声明写进 `HKCU\Software\Classes\`，属于当前用户级，**不需要管理员权限**。
+
+**③ 接收文件**（`launchQueue`）：系统起 `msedge_proxy.exe --app-id=<ID> --file-path=...` → 独立窗口 → 浏览器把 `FileSystemFileHandle` 推入 `window.launchQueue`。**读权限随双击动作一并授予**，不走 `showOpenFilePicker`，这是相比普通网页的质变。
+
+**④ 两个必须处理的时序问题**：
+
+- **启动竞态**：消费者可能早于 `init()` 送达，那时 `editor` 还是空的，文件会被随后的 `loadContent()` 顶掉。句柄先进 `pwaPending`，由 `init()` 末尾统一消费。
+- **覆盖确认**：`launch_type: single-client` 下，应用已开着时再双击另一篇会复用窗口直接替换正文。冷启动不问（用户明确要打开这个文件），**只在人已经碰过界面之后**才 `confirm()`。
+
+### 边界
+
+- **只做打开，不做写回**。句柄本身有写能力，但写盘属 F5-b（涉及 dirty 状态、外部修改、权限请求、多标签），本期不夹带。
+- **不引入 Service Worker**。SW 只支持 http/https，`file://` 路径永远用不上；一旦注册就是持久的，缓存策略写错会导致「改了代码用户还看旧版」；而离线本来也做不到——渲染链依赖 6 个 CDN 资源，全量缓存等于把项目变成需要发版更新的东西。**装成 PWA 不等于离线可用**。
+- **仅桌面 Chromium**（Chrome / Edge 102+）。Firefox / Safari / 移动端没有 `file_handlers`，回落为「打开 → 文件」。
+- **`file://` 路径原样保留**，它没有安装能力，双轨并行。
+
+### 任务拆解
+
+- [x] `manifest.json`（含 `file_handlers`）
+- [x] 从 `Markdown.ico` 派生 `icon-192.png` / `icon-512.png`（`tools/make-icons.js`，非重绘）
+- [x] `index.html` 挂 `<link rel="manifest">`（**总行数保持 506**，压缩注释腾出空间）
+- [x] `app.js` 末尾加 `launchQueue` 消费者 + `init()` 末尾消费 `pwaPending`
+- [x] `pwa-check.js`：CDP 问浏览器「能不能装」
+- [x] `pwa-test.js`：jsdom 跑两条时序路径
+- [ ] **人工验证**：真装一次，确认 `.md` 出现在「打开方式」里
+- [ ] 写回磁盘（属 F5-b，不在本期）
+
+### 验收标准
+
+1. `Page.getInstallabilityErrors` 返回空数组（这是 DevTools「Installability」的同一数据源）
+2. manifest 零解析错误，`file_handlers` 被保留而非丢弃
+3. 两个图标的**实际像素**与 `sizes` 声明一致（不一致会被丢弃）
+4. 冷启动交付的文件不被 `localStorage` 里的草稿顶掉
+5. 没有 `launchQueue` 的环境（Firefox / 普通标签页）启动不报错
+6. 装完后右键 `.md` →「打开方式」里能看到本应用（**此条只能人工验**）
+
+### 落地记录（2026-10-30）
+
+- **`pwa-test.js` 29 条全过**：静态段锁 manifest 字段、图标真实像素、`file_handlers` 不含 `.txt`、全程无 `serviceWorker.register`；jsdom 段跑 B1 冷启动（pending 路径）/ B2 就绪后交付 / B3 覆盖确认（取消不动、确认才换）/ B4 GBK 兜底 / B5 无 `launchQueue` 环境。
+- **既有套件全绿**：`fm-unit` 95 + `fm-e2e` 112 + `bq-test` 58 + `ex-test` 322 + `fs-test` 238 + `url-test` 85，与基线一致。
+- **`pwa-check.js` 实测**（headless Edge 155 + CDP）：`installable: true`、`installabilityErrors: []`、`manifestErrors: []`；`icon-192.png` 与 `icon-512.png` 解码后确为 192/192、512/512；`launchQueue` / `LaunchParams.files` / `showOpenFilePicker` 均就位。
+- **踩到的坑**：`Page.getAppManifest` 返回的 `parsed` 只有 `scope` / `start_url` / `is_installable` 等少数属性，**不是完整 manifest**——第一次按 `parsed.icons` 读，看到 `icons: []` 误以为图标没被识别，实际要从 `data` 字段读原文。
+- **未验证项**：真实安装后的文件关联。安装是浏览器 chrome 的动作，CDP 点不到，headless 造不出来——**这一步必须人工装一次确认**，不能拿「installable: true」当已修好。
+
+---
+
 ## 非目标
 
 以下方向本期**明确不做**，避免范围蔓延：
@@ -889,7 +957,9 @@ F5 **不越界**：纯本地、不碰后端，与「非目标」中的「云同�
 - 图床集成（图片上传链路应单独立项）
 - AI 辅助写作
 - 多人协作与版本历史
-- 移动端 App / 桌面客户端
+- 移动端 App / 原生桌面客户端（Electron / Tauri 打包）
+
+> **F7 不越界**：PWA 是网页的安装形态，不是原生客户端——它没有构建产物、没有安装包、没有签名与更新器，源码仍是那三个静态文件。它拿到的是「系统里的一个入口」，不是「一个新平台」。
 
 > 关于 F5 与上述边界的交集：**F5 不越界**——它纯本地、不碰后端，与「云同步」无关。但**版本历史明确不做**：文件一旦落到磁盘就交给 git 管理，不应在编辑器内另造一套滚动快照；F5-d 的「外部修改检测」只做**冲突提示**，不做自动合并或历史回溯。
 

@@ -52,12 +52,15 @@
 
 ```
 mdtu-editor/
-├── index.html        # 页面结构 + CDN 依赖引入 + 图标声明（506 行）
-├── Markdown.ico      # 站点图标，六帧（16/32/48/64/128/256）；页头 / 标签页 / 桌面快捷方式共用
+├── index.html        # 页面结构 + CDN 依赖引入 + 图标与 manifest 声明（506 行）
+├── Markdown.ico      # 站点图标，六帧（16/32/48/64/128/256）；页头 / 标签页共用，也是 PWA 图标的源
+├── manifest.json     # PWA 清单：安装元数据 + file_handlers（.md 关联）
+├── icon-192.png      # PWA 图标 192×192，由 Markdown.ico 的 256 帧派生
+├── icon-512.png      # PWA 图标 512×512，同上（放大得到）
 ├── css/
 │   └── style.css     # 全部样式：2 套主题 + 布局 + 弹窗 + 水印 + 元数据 + 设备档预览 + 文件树抽屉 + 打开与导出下拉 + 打印 + 滚动条 + Mermaid 放大浮层 + 复制按钮的微信标识 + 顶栏 GitHub 入口 + 目录大纲收起悬浮球 + 采集进行中态（1969 行）
 ├── js/
-│   └── app.js        # 全部逻辑：解析/渲染/大纲/水印/模板/元数据/复制/导出/导出 PDF/设备档预览/文件夹模式/滚动条悬停放大/Mermaid 放大浮层 + 顶栏下拉互斥 + 派生目录 + URL 采集通道链（3749 行）
+│   └── app.js        # 全部逻辑：解析/渲染/大纲/水印/模板/元数据/复制/导出/导出 PDF/设备档预览/文件夹模式/滚动条悬停放大/Mermaid 放大浮层 + 顶栏下拉互斥 + 派生目录 + URL 采集通道链 + launchQueue 接收系统交付的文件（3810 行）
 ├── README.md         # 项目说明（GitHub 标准格式）
 ├── ROADMAP.md        # 未来功能升级路线（独立文档）
 ├── DESIGN.md         # 本文档
@@ -69,7 +72,9 @@ mdtu-editor/
 
 无任何构建产物，无 `node_modules`。
 
-**站点图标（`Markdown.ico`）。** 仓库根只有这一个图标文件，六帧（16/32/48/64/128/256），**页头左上角、浏览器标签页 / 窗口、桌面快捷方式三处共用同一个文件**——页头是 `<img class="logo-icon" src="Markdown.ico" width="26" height="26">`（`.logo-icon` 从原先的 📝 emoji 字形换成图片，尺寸由 CSS 固定），标签页是 `<link rel="icon" href="Markdown.ico">`。**指向就是全部工作，文件本身不由本页生成、也不需要重新生成**。不另产 `favicon.ico`、没有 `apple-touch-icon.png`：几份同内容（或不同内容）的图标文件只会各说各话。要换图标，直接替换这个文件即可（三处同步生效）。
+**站点图标（`Markdown.ico`）。** 六帧（16/32/48/64/128/256），**页头左上角与浏览器标签页 / 窗口共用同一个文件**——页头是 `<img class="logo-icon" src="Markdown.ico" width="26" height="26">`（`.logo-icon` 从原先的 📝 emoji 字形换成图片，尺寸由 CSS 固定），标签页是 `<link rel="icon" href="Markdown.ico">`。**指向就是全部工作，文件本身不由本页生成、也不需要重新生成**。不另产 `favicon.ico`、没有 `apple-touch-icon.png`：几份同内容（或不同内容）的图标文件只会各说各话。
+
+**唯一的例外是 PWA 图标，且只允许「派生」。** manifest 不接受 `.ico`，必须给 192×192 与 512×512 的 PNG，所以根目录多了 `icon-192.png` / `icon-512.png`。它们由 `Markdown.ico` 里最大的 256 帧解码后重采样得到（`tools/make-icons.js`，仓库外工具目录），**不是重新绘制的第二版图标**——图形以 `Markdown.ico` 为唯一源。因此「只有一个图标源」这条约束仍然成立：改图标只改 `Markdown.ico`，再重跑一次生成脚本。512 是从 256 放大的（ico 里没有更大的帧），边缘会比原生 512 略软，这是这套图标的固有上限，不是生成脚本的问题。
 
 ### 3.2 分层架构
 
@@ -530,6 +535,28 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 **「全部展开 / 全部收起」是两件不同的事。** 收起只是 `treeState.expanded.clear()`（清空展开集合，树的 `children` 留着，重新展开不必再读盘）。展开则要**逐个目录读盘**——懒加载的树一旦全展开，等于把整棵目录树读进内存，几千文件的目录会直接拖死 UI，所以 `TREE_EXPAND_MAX = 400` 封顶：到顶就停手并 `showToast('目录较多，只展开了前 400 个')`，而不是假装展完了。读盘过程中每 20 个目录重绘一次（每个都重绘会把整趟遍历拖慢一个量级），并用 `treeExpanding` 防止重复点击叠加。
 
 **打开成功不弹 Toast。** 正文已经换掉了，再盖一层浮层只是碍事——这条同时适用于单文件打开与树里切换文档。**只有一种例外**：非 UTF-8（GBK 回退）/ UTF-16 解码时必须提示，因为那时眼前的内容不是原文件字节的忠实还原，而且只读。
+
+### 7.11 PWA：安装与 .md 文件关联（F7）
+
+**要解决的问题不是缺一个功能，是缺一个身份。** 纯静态网页在操作系统里没有注册项，所以右键 `.md` 的「打开方式」里永远没有它；用户每天的路径是「开网页 → 点打开 → 选文件」三步。三条可能的路线中，打包成壳（Electron / Tauri）能拿身份但要引入构建链和 80MB+ 体积，换入口模型（vault 式）要放弃「双击任意 md」，只有 PWA 这条既保住零构建、又能真正进系统注册表。
+
+**它进注册表的机制值得记下来**：安装时 Chromium 把 `file_handlers` 写进 `HKCU\Software\Classes\`，这是**当前用户级**的注册表，不需要管理员权限。也就是说 PWA 不是绕过系统，而是让浏览器代理了安装器的职责。`launch_type: single-client` 决定多个文件被一次性交付给同一个窗口。
+
+| manifest 字段 | 取值 | 为什么是这个 |
+|---|---|---|
+| `start_url` / `scope` / `id` | `./` | 相对 manifest 自身解析，GitHub Pages 子路径与本地根路径都成立；`id` 必须显式写死，否则以后改 `start_url` 会被当成另一个应用而不是升级 |
+| `display` | `standalone` | 独立窗口、无地址栏；写 `browser` 等于主动放弃安装 |
+| `icons` | 192 + 512 PNG | 两个尺寸都必须有，且**实际像素**要与 `sizes` 声明一致，否则该条目被丢弃 |
+| `file_handlers.action` | `./` | 必须是 scope 内**真实可访问**的静态路径（静态站没有路由，写 `/open` 会 404） |
+| `file_handlers.accept` | `text/markdown: .md/.markdown/.mdx` | 刻意不含 `.txt`——那会顶掉系统默认文本编辑器 |
+
+**启动链路（双击那一刻发生什么）**：Shell 读 `HKCU\Software\Classes\.md` 拿到 ProgID → 查到 `msedge_proxy.exe --app-id=<ID> --file-path=...` → 起独立窗口 → 浏览器把 `FileSystemFileHandle` 推入 `window.launchQueue`。**句柄的读权限随双击动作一并授予**，不再需要 `showOpenFilePicker`，这是相比普通网页的质变。写权限则不同：系统只理解了「用户想打开它」，写回要在真实手势里再 `requestPermission({ mode: 'readwrite' })`（属 F5-b）。
+
+**两个必须处理的工程细节。** ① **启动竞态**：`launchQueue` 的消费者可能早于 `init()` 送达，那时 `editor` 还是空的，文件会被随后的 `loadContent()` 顶掉。所以句柄先进 `pwaPending`，由 `init()` 末尾统一消费——**这条有专门的测试守着**（`pwa-test.js` 的 B1，模拟「注册瞬间队列里已有 launch」）。② **覆盖确认**：应用已开着时再双击另一篇，`single-client` 会复用窗口并直接替换正文。冷启动不问（用户明确要打开这个文件），**只在人已经碰过界面之后**才 `confirm()`，避免正在编辑的内容被静默吞掉。
+
+**本期刻意不引入 Service Worker。** 三个理由：SW 只支持 http/https，`file://` 双击路径永远用不上它，双轨不可避免；它一旦注册就是持久的，缓存策略写错会导致「改了代码用户还看旧版」，是长期维护成本；而离线本来也做不到——渲染链依赖 6 个 CDN 资源，不全量缓存就仍然白屏，全量缓存等于把这个项目变成一个需要发版更新的东西，与零构建的定位冲突。**能力边界**：仅 Chromium 系桌面浏览器（Chrome / Edge 102+），Firefox / Safari / 移动端没有 `file_handlers`，回落为「打开 → 文件」。
+
+**验证分两段，别把它们混为一谈**：`pwa-check.js` 用 headless Edge + CDP 的 `Page.getInstallabilityErrors` 问浏览器「能不能装」（这是 DevTools 里那份判据的同一数据源），`pwa-test.js` 用 jsdom 打桩跑「装完之后点到的那条代码路径」。**「装完真的出现在打开方式里」这一步 headless 做不到**——安装是浏览器 chrome 的动作，CDP 点不到——必须人工装一次确认。
 
 ---
 

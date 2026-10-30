@@ -3310,6 +3310,14 @@ img { max-width: 100%; }`;
     suppressSync();
     editor.scrollTop = 0;
     previewWrap.scrollTop = 0;
+
+    // 标记就绪，并消费可能在 init 之前就已送达的 launch（PWA 双击打开文件）
+    pwaReady = true;
+    if (pwaPending) {
+      const handle = pwaPending;
+      pwaPending = null;
+      openFromHandle(handle);
+    }
   }
 
   // ===== 派生目录（derived TOC）=====
@@ -3373,6 +3381,59 @@ img { max-width: 100%; }`;
     });
 
     slot.parentNode.replaceChild(root, slot);
+  }
+
+  /* ===== PWA：系统把文件交过来（双击 .md / 右键「打开方式」）=====
+     manifest 的 file_handlers 让装好的应用出现在系统「打开方式」里；启动时系统把
+     FileSystemFileHandle 塞进 launchQueue，**读权限已经授予**（双击这个动作本身就是
+     授权手势），不需要再走 showOpenFilePicker。
+     两个必须处理的前提：
+     1. 消费者可能早于 init() 送达 —— 那时 editor 里还是空的，文件会被随后的
+        loadContent() 顶掉。所以先存进 pwaPending，等 init 跑完再应用。
+     2. 应用已经开着时再双击另一篇（launch_type: single-client 会复用窗口），直接
+        覆盖会吞掉当前内容 —— 只在人碰过界面之后才确认，冷启动不问。 */
+  let pwaReady = false;
+  let pwaPending = null;
+  let pwaTouched = false;
+  ['pointerdown', 'keydown'].forEach(function (t) {
+    window.addEventListener(t, function () { pwaTouched = true; }, { once: true, capture: true });
+  });
+
+  async function openFromHandle(handle) {
+    try {
+      const bytes = new Uint8Array(await (await handle.getFile()).arrayBuffer());
+      const dec = decodeBytes(bytes);
+      const cur = editor.value.trim();
+      if (pwaTouched && cur && cur !== dec.text.trim()) {
+        if (!window.confirm('打开「' + handle.name + '」会替换当前编辑区的内容，继续？')) return;
+      }
+      // 与 openTreeNode 同一条落库路径：换 value → 重渲染 → 存档。渲染层是纯函数，
+      // 主题 / 元数据 / 大纲 / 字数 / 水印全部自动跟随。
+      editor.value = dec.text;
+      renderMarkdown();
+      saveContent();
+      suppressSync();
+      editor.scrollTop = 0;
+      previewWrap.scrollTop = 0;
+      const enc = dec.encoding;
+      if (enc === 'non-utf8') showToast('非 UTF-8 文件，已按 GBK 只读预览', 'error');
+      else if (enc.indexOf('utf-16') === 0) showToast(enc.toUpperCase() + ' 文件，仅只读预览', 'error');
+    } catch (err) {
+      showToast('打开失败：' + ((err && err.message) || err), 'error');
+    }
+  }
+
+  // 特性检测要分两半：launchQueue 存在不等于 files 可用（只做导航的 launch 也有它）
+  const pwaFileLaunch = 'launchQueue' in window && typeof LaunchParams !== 'undefined'
+    && !!LaunchParams.prototype && 'files' in LaunchParams.prototype;
+  if (pwaFileLaunch) {
+    window.launchQueue.setConsumer(function (params) {
+      if (!params.files || !params.files.length) return;
+      const handle = params.files[0];
+      if (!handle) return;
+      if (!pwaReady) { pwaPending = handle; return; }
+      openFromHandle(handle);
+    });
   }
 
   // Wait for libraries

@@ -1,0 +1,37 @@
+{
+  "name": "MD · Markdown 编辑器",
+  "short_name": "MD 编辑器",
+  "description": "本地 Markdown 编辑器：编辑、预览、导出，可直接打开并写回磁盘上的 .md 文件",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f5f7fa",
+  "theme_color": "#ffffff",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": {
+        "text/markdown": [".md", ".markdown", ".mdx"]
+      },
+      "launch_type": "single-client"
+    }
+  ]
+}
