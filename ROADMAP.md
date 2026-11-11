@@ -1,4 +1,4 @@
-# Markdown-Editor 未来功能升级路线
+# markdown-editor 未来功能升级路线
 
 本文件是 [README.md](./README.md) 中「未来功能升级」模块的展开版，记录规划背景、调研结论、技术方案与任务拆解。
 
@@ -806,6 +806,28 @@ F5 **不越界**：纯本地、不碰后端，与「非目标」中的「云同�
 
 ---
 
+### 落地记录（第七轮：手动刷新 / 工具改名，2026-11-09）
+
+起因同样是使用中撞上的：**打开文件夹后，文档在别处被改了，页面毫无感知**——用户看到的还是打开那一刻的内容，而界面上没有任何地方能让他确认「我眼前这份是不是最新的」。
+
+- 浏览器**没有任何**「这个文件被改过」的通知（`FileSystemFileHandle` 不带监听，`File.getFile()` 只在被调用时读一次），所以这不是 bug，是这条技术路线的固有缺口。
+- 三条备选：① 轮询 —— 几百个文件的目录等于持续读盘，且要和「未保存改动」打架；② 只提示不重载 —— 提示了也没用，用户还是得手动去重开；③ **手动刷新** —— 一次点击解决，代价是用户得知道自己要看新的。选 ③：诉求本来就是「我知道外面变了，帮我看一眼」。
+
+| # | 调整 | 做法 |
+|---|------|------|
+| 1 | **头部新增「刷新」按钮** | `#treeRefresh` 挂在 `.tree-head-actions`，紧挨「更换文件夹」之前；图标是循环箭头。没有工作区时与其他树操作一起 `hidden` |
+| 2 | **重读「已枚举过」的目录** | `collectLoaded()` 先记下哪些目录读过，`reloadSubtree()` 只对这些递归重读。**没读过的保持懒加载**——否则点一次刷新等于全部展开（理由与 `TREE_EXPAND_MAX` 同源） |
+| 3 | **重读当前文档正文** | `reloadCurrentDoc()`：先比 `treeState.diskText`（上次从磁盘读到的原文），一样就什么都不做；不一样才写回 `editor.value` |
+| 4 | **脏判断靠原文，不靠自己比自己** | `editor.value !== treeState.diskText` 才算改过。有改动先 `confirm()`——`editor.value` 是整体替换，盖掉之后连撤销都救不回来 |
+| 5 | **文件消失不清空正文** | 只清 `currentPath` + 提示「已不在文件夹里」。用户可能刚在里面写了东西，静默清空是最不可原谅的一种「刷新」 |
+| 6 | **busy 态** | 刷新期间 `.is-busy`（图标转圈）+ `disabled`，防连点叠出并发读盘；`prefers-reduced-motion` 下不转圈 |
+| 7 | **快照模式不装样子** | `webkitdirectory` 的 `File` 是选择那一刻的快照，读不到磁盘更新 → 点刷新改走「重新选目录」并说明原因 |
+| 8 | **工具改名为 `markdown-editor`** | `<title>` / `meta description` / 页头 `.logo-text` / `manifest.json` 的 `name` + `short_name`（系统「打开方式」里显示的就是它）统一小写连字符；顺手把 manifest 描述里「可写回磁盘」这句不实的话删掉（F5-b 未做，目前是只读）。`localStorage` 键名仍是 `mdtu-*`，**故意不改**——改了等于把用户已有的主题 / 模板 / 存档全丢掉 |
+
+**验证（本轮）**：`fs-test` 238 → **268 条**（新增 30 条：静态侧「刷新按钮存在且紧挨换文件夹 / busy 动画 / `prefers-reduced-motion` / 快照模式改走重选目录」，jsdom 侧「新增文档出现在树上 / 报出新增篇数 / 磁盘改正文后刷新能跟上且进存档 / 有未保存改动不覆盖 / 文件被删不清空正文 / 保留展开态 / 只重读读过的目录 / 子目录读失败只局部标红 / busy 态转圈并禁用」，真实 Edge 侧「刷新按钮在抽屉内可见 / `@keyframes` 真的生效」）。其余五套不变：`fm-unit` 95、`fm-e2e` 112、`bq-test` 58、`ex-test` 322、`url-test` 85，**合计 940 条断言全绿**；套件外单跑 `pwa-test.js` 29 → **30 条**（改名后补锁 `name` / `short_name`）。`index.html` 净 0 行（新增按钮 4 行、压缩既有注释 4 行，仍是 506 行，`index.html:118` / `:264` 两处引用不动）；`style.css` 尾部新增刷新中态 +16 行（1986）；`app.js` +180 行（3990）。
+
+---
+
 ## F6 · 预览模式（设备档）
 
 > **状态：✅ 已实现**（2026-10-13）。落地文件：`index.html`（预览工具栏的 `#deviceGroup` 一组平铺档位按钮，`index.html:264–270`）、`css/style.css`（`/* ===== Preview Mode: 设备端 =====` 段，style.css:527 起；按钮组样式在 `.seg-btn` 1351 / `.seg-group` 1381 处）、`js/app.js`（`// ===== Preview Mode: 设备端 =====` 段，app.js:872 起）。**零新增依赖**（档位就是原生 `<button>`，没有引入任何 UI 库）。
@@ -941,7 +963,7 @@ F5 **不越界**：纯本地、不碰后端，与「非目标」中的「云同�
 
 ### 落地记录（2026-10-30）
 
-- **`pwa-test.js` 29 条全过**：静态段锁 manifest 字段、图标真实像素、`file_handlers` 不含 `.txt`、全程无 `serviceWorker.register`；jsdom 段跑 B1 冷启动（pending 路径）/ B2 就绪后交付 / B3 覆盖确认（取消不动、确认才换）/ B4 GBK 兜底 / B5 无 `launchQueue` 环境。
+- **`pwa-test.js` 30 条全过**：静态段锁 manifest 字段（含 2026-11-09 改名后补上的 `name` / `short_name` 两条）、图标真实像素、`file_handlers` 不含 `.txt`、全程无 `serviceWorker.register`；jsdom 段跑 B1 冷启动（pending 路径）/ B2 就绪后交付 / B3 覆盖确认（取消不动、确认才换）/ B4 GBK 兜底 / B5 无 `launchQueue` 环境。
 - **既有套件全绿**：`fm-unit` 95 + `fm-e2e` 112 + `bq-test` 58 + `ex-test` 322 + `fs-test` 238 + `url-test` 85，与基线一致。
 - **`pwa-check.js` 实测**（headless Edge 155 + CDP）：`installable: true`、`installabilityErrors: []`、`manifestErrors: []`；`icon-192.png` 与 `icon-512.png` 解码后确为 192/192、512/512；`launchQueue` / `LaunchParams.files` / `showOpenFilePicker` 均就位。
 - **踩到的坑**：`Page.getAppManifest` 返回的 `parsed` 只有 `scope` / `start_url` / `is_installable` 等少数属性，**不是完整 manifest**——第一次按 `parsed.icons` 读，看到 `icons: []` 误以为图标没被识别，实际要从 `data` 字段读原文。

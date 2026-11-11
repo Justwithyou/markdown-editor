@@ -1967,3 +1967,20 @@ body {
 .modal-hint.is-error {
   color: #e5484d;
 }
+
+/* ===== 文件树：手动刷新 ===== */
+/* 「正在重读磁盘」这件事只能靠图标的转动表示 —— 一次刷新可能要读几十个目录，
+   光靠按钮按下态看不出还在干活。转速与 toast 的 2.5s 无关，纯粹是「转着=在跑」。 */
+.tree-btn.is-busy {
+  cursor: progress;
+  color: var(--accent);
+}
+.tree-btn.is-busy svg {
+  animation: tree-refresh-spin .8s linear infinite;
+}
+@keyframes tree-refresh-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tree-btn.is-busy svg { animation: none; }
+}

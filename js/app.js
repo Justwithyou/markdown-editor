@@ -1,5 +1,5 @@
 /* ============================================================
- * MDTU 码途编辑器 - 本地版
+ * markdown-editor - 本地版
  * 基于 marked / highlight.js / KaTeX / Mermaid
  * ============================================================ */
 
@@ -169,7 +169,7 @@
   }
 
   // ===== Default Content =====
-  const defaultContent = `# Markdown-Editor
+  const defaultContent = `# markdown-editor
 
 一款支持微信样式与水印的 Markdown 编辑器。
 
@@ -2702,6 +2702,9 @@ img { max-width: 100%; }`;
     currentPath: '',
     expanded: new Set(),
     visible: false,
+    // 当前文档「上次从磁盘读到的原文」——判「编辑器里有没有未保存改动」的唯一依据。
+    // 不能用 editor.value 自己比：它一开始就等于原文，没有第二个参照物就分不清「改过」和「没改过」。
+    diskText: null,
   };
 
   function treeExt(name) {
@@ -2884,10 +2887,10 @@ img { max-width: 100%; }`;
   function renderTree() {
     const hasRoot = !!treeState.root;
 
-    // 头部这一行就是工作区名字；没有工作区时它空着，三个树操作一并藏起来（只留「收起」）
+    // 头部这一行就是工作区名字；没有工作区时它空着，树操作一并藏起来（只留「收起」）
     treeRootEl.textContent = hasRoot ? treeState.root.name : '';
     treeRootEl.title = hasRoot ? treeState.root.name : '';
-    [$('#treeExpandAll'), $('#treeCollapseAll'), $('#treePickBtn')].forEach(function (b) {
+    [$('#treeExpandAll'), $('#treeCollapseAll'), $('#treeRefresh'), $('#treePickBtn')].forEach(function (b) {
       b.hidden = !hasRoot;
     });
 
@@ -3060,6 +3063,8 @@ img { max-width: 100%; }`;
       // 换文档就是换 editor.value —— 渲染层是纯函数，主题 / 元数据 / 大纲 /
       // 字数统计 / 水印 / 外链脚注全部自动跟随，这里一行都不用改。
       editor.value = dec.text;
+      // 记下「这份内容是从磁盘读来的」——刷新时靠它判断编辑器里有没有未保存改动
+      treeState.diskText = dec.text;
       renderMarkdown();
       // 沿用单文档那套存档：刷新后仍停在这篇（F5-b 再换成工作区存档）
       saveContent();
@@ -3079,6 +3084,178 @@ img { max-width: 100%; }`;
     }
   }
 
+  // ----- 刷新：手动重读磁盘 -----
+  // 浏览器不会通知我们「磁盘上这个文件被改过了」：VS Code 保存、git checkout、另一个窗口写入，
+  // 页面一概无感知，用户看到的永远是打开那一刻的内容。所以这里给一个**手动**入口 ——
+  // 它做两件事：重读已经展开过的目录（文件有增删改名）、重读当前文档（内容有变）。
+  // 不做自动轮询：文档目录动辄几百个文件，轮询等于持续读盘，而真实诉求是
+  // 「我知道外面变了，帮我看一眼」，手动触发更省事也更好解释。
+  const DIRTY_CONFIRM = '当前文档在编辑器里有未保存的改动，重新载入会覆盖这些改动。是否继续？';
+  let treeRefreshing = false;
+
+  function setRefreshBusy(busy) {
+    const btn = $('#treeRefresh');
+    if (!btn) return;
+    btn.classList.toggle('is-busy', busy);
+    // 一次刷新要连着读几十个目录，期间允许连点只会叠出多条并发的读盘
+    btn.disabled = busy;
+  }
+
+  // 「哪些目录已经枚举过」。刷新只重读这些，其余保持懒加载 ——
+  // 否则点一次刷新等于把整棵树全部展开（几千文件的目录直接卡死，见 TREE_EXPAND_MAX 的同一个理由）
+  function collectLoaded(node, out) {
+    if (!node.children) return out;
+    out.add(node.path);
+    node.children.forEach(function (c) {
+      if (c.kind === 'dir') collectLoaded(c, out);
+    });
+    return out;
+  }
+
+  // 只数文件、不数目录：刷新后报「新增 / 移除 N 篇」比报目录变化对写作者更有意义。
+  // 未加载过的子目录 children 为 null，自然跳过 —— 没读过的地方本来就不该拿来比。
+  function collectFilePaths(node, out) {
+    if (!node.children) return out;
+    node.children.forEach(function (c) {
+      if (c.kind === 'dir') collectFilePaths(c, out);
+      else out.add(c.path);
+    });
+    return out;
+  }
+
+  // 重新枚举节点自己这一层，再对「之前读过」的子目录递归。
+  // loadChildren 会把 children 换成一批新节点（loaded=false），所以没读过的目录
+  // 刷新后依然是懒加载状态，语义跟首次打开完全一致。
+  // 单个子目录读不了（权限被单独撤销 / 正被别的程序锁住）只局部标红，不中断整次刷新 ——
+  // 一棵几百个目录的树上坏掉一个，不该把其余的都变回「读取失败」。
+  async function reloadSubtree(node, seen) {
+    await loadChildren(node);
+    for (let i = 0; i < node.children.length; i++) {
+      const c = node.children[i];
+      if (c.kind !== 'dir' || !seen.has(c.path)) continue;
+      try {
+        await reloadSubtree(c, seen);
+      } catch (err) {
+        c.error = (err && err.message) || String(err);
+        c.children = null;
+      }
+    }
+  }
+
+  // 展开集合里可能留着已经消失的目录（被删 / 被改名）。留着不出错，但会白占内存，
+  // 也会让「全部展开」重绘时多做无用功。
+  function pruneExpanded() {
+    const alive = new Set();
+    (function walk(node) {
+      if (!node.children) return;
+      node.children.forEach(function (c) {
+        if (c.kind !== 'dir') return;
+        alive.add(c.path);
+        walk(c);
+      });
+    })(treeState.root);
+    Array.from(treeState.expanded).forEach(function (p) {
+      if (!alive.has(p)) treeState.expanded.delete(p);
+    });
+  }
+
+  // 返回 { state, enc }：state ∈ none / gone / same / updated / kept / error
+  async function reloadCurrentDoc() {
+    if (!treeState.currentPath) return { state: 'none' };
+    const node = findNode(treeState.currentPath);
+    if (!node || node.kind !== 'file') {
+      // 文件已经不在了。正文不删 —— 用户可能刚在里面写了东西，
+      // 静默清空是最不可原谅的一种「刷新」。只是不再指向任何一行。
+      treeState.currentPath = '';
+      return { state: 'gone' };
+    }
+
+    let dec;
+    try { dec = await readNodeText(node); }
+    catch (err) { return { state: 'error' }; }
+
+    const prev = treeState.diskText;
+    if (prev !== null && dec.text === prev) return { state: 'same', enc: dec.encoding };
+
+    // 有未保存改动时绝不静默覆盖：editor.value 是整体替换，盖掉之后连撤销都救不回来
+    if (editor.value !== prev && !window.confirm(DIRTY_CONFIRM)) return { state: 'kept' };
+
+    editor.value = dec.text;
+    treeState.diskText = dec.text;
+    renderMarkdown();
+    saveContent();
+    suppressSync();
+    // 滚动位置刻意不动：刷新是为了看新内容，不是为了回到开头
+    return { state: 'updated', enc: dec.encoding };
+  }
+
+  function reportRefresh(before, after, doc) {
+    if (doc.state === 'error') { showToast('刷新失败：当前文档读不出来', 'error'); return; }
+    if (doc.state === 'gone') {
+      showToast('已刷新，但当前文档已不在文件夹里（内容仍留在编辑器中）', 'error');
+      return;
+    }
+    if (doc.state === 'kept') { showToast('文件树已刷新；当前文档有未保存改动，未覆盖'); return; }
+    if (doc.state === 'updated') {
+      // 编码问题必须说：眼前这份不是原文件字节的忠实还原，而且是只读的
+      if (doc.enc === 'non-utf8') { showToast('已重新载入（非 UTF-8，按 GBK 只读预览）', 'error'); return; }
+      if (doc.enc && doc.enc.indexOf('utf-16') === 0) { showToast('已重新载入（' + doc.enc.toUpperCase() + '，只读预览）', 'error'); return; }
+      showToast('已刷新：当前文档已重新载入', 'success');
+      return;
+    }
+
+    let add = 0;
+    let del = 0;
+    after.forEach(function (p) { if (!before.has(p)) add++; });
+    before.forEach(function (p) { if (!after.has(p)) del++; });
+    if (!add && !del) { showToast('已刷新：没有发现变化'); return; }
+    const parts = [];
+    if (add) parts.push('新增 ' + add);
+    if (del) parts.push('移除 ' + del);
+    showToast('已刷新：' + parts.join(' / ') + ' 篇文档');
+  }
+
+  async function refreshFolder() {
+    if (!treeState.root || treeRefreshing) return;
+
+    // 只读快照（<input webkitdirectory>）手里只有「选择那一刻」的文件列表，
+    // 没有重新读盘的通道 —— 只能请用户再选一次，别假装刷新过了
+    if (treeState.mode !== 'pick') {
+      showToast('只读模式读不到磁盘更新，请重新选择文件夹');
+      folderInput.click();
+      return;
+    }
+
+    treeRefreshing = true;
+    setRefreshBusy(true);
+    const root = treeState.root;
+    const before = collectFilePaths(root, new Set());
+    const seen = collectLoaded(root, new Set());
+
+    try {
+      await reloadSubtree(root, seen);
+    } catch (err) {
+      root.error = (err && err.message) || String(err);
+    }
+
+    if (root.error) {
+      // 目录被移走 / 权限被撤销：如实报错，树保持原样，别清空成「工作区没了」
+      treeRefreshing = false;
+      setRefreshBusy(false);
+      renderTree();
+      showToast('刷新失败：' + root.error, 'error');
+      return;
+    }
+
+    const doc = await reloadCurrentDoc();
+    pruneExpanded();
+    const after = collectFilePaths(root, new Set());
+    treeRefreshing = false;
+    setRefreshBusy(false);
+    renderTree();
+    reportRefresh(before, after, doc);
+  }
+
   async function pickFolder() {
     if (treeState.mode !== 'pick') return;
     let handle;
@@ -3091,6 +3268,7 @@ img { max-width: 100%; }`;
 
     treeState.root = makeNode(handle.name, 'dir', '', handle);
     treeState.currentPath = '';
+    treeState.diskText = null;
     treeState.expanded.clear();
     renderTree();
     setTreePanel(true);
@@ -3121,6 +3299,7 @@ img { max-width: 100%; }`;
 
     treeState.root = buildSnapshotTree(files);
     treeState.currentPath = '';
+    treeState.diskText = null;
     treeState.expanded.clear();
     setTreePanel(true);
     showToast('已打开文件夹：' + treeState.root.name + '（只读快照，仅显示 Markdown 文档）');
@@ -3289,6 +3468,7 @@ img { max-width: 100%; }`;
     $('#treeClose').addEventListener('click', function () { setTreePanel(false); });
     $('#treeExpandAll').addEventListener('click', function () { expandAll(); });
     $('#treeCollapseAll').addEventListener('click', function () { collapseAll(); });
+    $('#treeRefresh').addEventListener('click', function () { refreshFolder(); });
     folderInput.addEventListener('change', onFolderInputChange);
     renderTree();
   }

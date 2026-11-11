@@ -1,7 +1,7 @@
 {
-  "name": "MD · Markdown 编辑器",
-  "short_name": "MD 编辑器",
-  "description": "本地 Markdown 编辑器：编辑、预览、导出，可直接打开并写回磁盘上的 .md 文件",
+  "name": "markdown-editor",
+  "short_name": "markdown-editor",
+  "description": "本地 Markdown 编辑器：编辑、预览、导出，可直接打开磁盘上的 .md 文件",
   "lang": "zh-CN",
   "dir": "ltr",
   "id": "./",
