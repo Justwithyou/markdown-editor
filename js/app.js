@@ -2702,6 +2702,10 @@ img { max-width: 100%; }`;
     currentPath: '',
     expanded: new Set(),
     visible: false,
+    // 用户点过球上的「×」= 这一会儿不想看见文件树。**只活在这一场会话里**：
+    // 刷新之后工作区句柄本来就没了（FSA 不跨刷新授权），球也不会再出现，没什么可记的。
+    // 重新从顶栏「打开 → 文件夹」打开抽屉即作废（见 setTreePanel）。
+    peekOff: false,
     // 当前文档「上次从磁盘读到的原文」——判「编辑器里有没有未保存改动」的唯一依据。
     // 不能用 editor.value 自己比：它一开始就等于原文，没有第二个参照物就分不清「改过」和「没改过」。
     diskText: null,
@@ -2938,11 +2942,14 @@ img { max-width: 100%; }`;
 
   function setTreePanel(show) {
     treeState.visible = show;
+    // 「明确打开」= 之前那次「彻底关闭」作废：下次收起，球照常回来。
+    // 不这么做的话，关过一次球以后就再也没有「收起成球」这条路了。
+    if (show) treeState.peekOff = false;
     treePanel.classList.toggle('show', show);
     if (btnOpenFolder) btnOpenFolder.classList.toggle('active', show);
-    // 悬浮球只在「已经打开过工作区 + 抽屉处于收起」时露出来；
+    // 悬浮球只在「已经打开过工作区 + 抽屉处于收起 + 用户没点过 ×」时露出来；
     // 还没选过文件夹时不占地方（那会儿入口就在顶栏菜单里，不需要第二个）
-    if (treePeek) treePeek.hidden = !(!show && treeState.root);
+    if (treePeek) treePeek.hidden = !!treeState.peekOff || !(!show && treeState.root);
     if (show) renderTree();
   }
 
@@ -3351,7 +3358,7 @@ img { max-width: 100%; }`;
     if (!isNaN(w)) { try { localStorage.setItem(TREE_W_KEY, String(w)); } catch (e) {} }
   });
 
-  // ----- 收起后的悬浮球：拖动改位置，轻点展开抽屉 -----
+  // ----- 收起后的悬浮球：拖动改位置，轻点展开抽屉，右上角「×」彻底关闭 -----
   // 「拖动」与「点击」靠位移阈值区分：指针抬起时总位移小于 PEEK_DRAG_SLOP 才算一次点击。
   // 不这么做的话，每次把球挪开都会顺手把抽屉弹出来。
   const PEEK_SIZE = 44;
@@ -3359,6 +3366,10 @@ img { max-width: 100%; }`;
 
   (function initTreePeek() {
     if (!treePeek) return;
+    const peekClose = $('#treePeekClose');
+    // 球里那枚「×」是第二枚真按钮：命中它就完全不进拖动流程，
+    // 否则 pointerdown 里的 setPointerCapture + preventDefault 会把它的 click 吃掉。
+    const onCloseBadge = (e) => !!(e.target && e.target.closest && e.target.closest('.peek-close'));
 
     function place(x, y) {
       const w = window.innerWidth || document.documentElement.clientWidth || 0;
@@ -3403,6 +3414,7 @@ img { max-width: 100%; }`;
 
     treePeek.addEventListener('pointerdown', function (e) {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
+      if (onCloseBadge(e)) return;
       const p = readPos();
       dragging = true;
       moved = false;
@@ -3439,11 +3451,32 @@ img { max-width: 100%; }`;
     }
 
     treePeek.addEventListener('pointerup', function (e) {
+      // 落在「×」上的一次抬起不是「点球」——不拦的话，关掉它的同时还会顺手把抽屉弹开一次
+      if (onCloseBadge(e)) return;
       const wasMoved = moved;
       endDrag(e);
       if (!wasMoved) setTreePanel(true);
     });
     treePeek.addEventListener('pointercancel', endDrag);
+
+    // 球是 div[role=button]（里面还要放一枚真按钮，button 套 button 不合法），
+    // 键盘回车 / 空格得自己接 —— 原来那枚 button 是浏览器送的
+    treePeek.addEventListener('keydown', function (e) {
+      if (e.target !== treePeek) return;
+      if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+      e.preventDefault();
+      setTreePanel(true);
+    });
+
+    // 「×」= 彻底关闭：抽屉不展开，球也不留。只收起不关闭的话，屏幕上永远挂着一枚
+    // 关不掉的蓝球，而这正是当初最别扭的地方。唤回入口是顶栏「打开 → 文件夹」。
+    if (peekClose) {
+      peekClose.addEventListener('click', function (e) {
+        e.stopPropagation();
+        treeState.peekOff = true;
+        treePeek.hidden = true;
+      });
+    }
   })();
 
   // 能力不够时把入口与抽屉整块摘掉，而不是渲染出来再报错
@@ -3987,4 +4020,61 @@ img { max-width: 100%; }`;
   // 下面两个入口都是「真正关闭」：球跟着消失，否则会出现「已关闭却仍有个球」的假态
   closeBtn.addEventListener('click', function () { peek.hidden = true; });
   topBtn.addEventListener('click', function () { peek.hidden = true; });
+})();
+
+/* ===== 全屏编辑（专注写作）=====
+   预览侧一向有「全屏预览」，写作侧却没有对应的那一下 —— 想安静写东西时只能手动缩窗口，
+   或者忍受左边的文件树和右边的预览一直占着半屏。这里补的就是那一下：
+   点一下，顶栏 / 预览 / 分隔条 / 文件树（抽屉 + 悬浮球）/ 目录大纲一起让位，编辑区铺满。
+
+   只做三件事：给 body 加一个 class、同步按钮自己的状态、进入时把焦点交回编辑器。
+   凡是「把界面收起来」都写在 CSS 里（style.css 尾部的 is-editing-focus 段），
+   所以退出时不需要复原任何元素的原样式 —— 少一个需要记的状态，就少一类复原错的 bug。
+
+   与「全屏预览」互斥：两块都铺满视口，叠在一起只会互相盖住，所以进这边先让预览退出去。
+   状态**不持久化**：刷新后照常是普通双栏（全屏是「现在专注一下」，不是一种设置）。 ===== */
+(function () {
+  'use strict';
+  const btn = document.getElementById('btnFocus');
+  const body = document.body;
+  if (!btn) return;
+
+  const CLS = 'is-editing-focus';
+  const TITLE_ON = '退出全屏编辑（Esc）';
+  const TITLE_OFF = btn.getAttribute('title') || '全屏编辑：只留编辑器，专注写作（Esc 退出）';
+
+  function isOn() { return body.classList.contains(CLS); }
+
+  function apply(on) {
+    body.classList.toggle(CLS, on);
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.title = on ? TITLE_ON : TITLE_OFF;
+    if (!on) return;
+
+    // 预览侧还开着全屏 → 先让它退出去（点它自己的按钮，走它自己的复原逻辑）
+    const pv = document.getElementById('previewPanel');
+    const exitFs = document.getElementById('btnExitFs');
+    if (pv && pv.classList.contains('fullscreen') && exitFs) exitFs.click();
+
+    // 焦点交回正文：进来就是为了写字，还要再点一下才拿到光标就白折腾
+    const ed = document.getElementById('editor');
+    if (ed) ed.focus();
+  }
+
+  btn.addEventListener('click', function () { apply(!isOn()); });
+
+  // 反向互斥：全屏编辑开着的时候，顶栏「全屏预览」是点不动的 ——
+  // .preview-panel 还被 is-editing-focus 的 display:none 压着，给了 .fullscreen 也看不见，
+  // 表现就是「点了没反应」。所以从这边进预览，先把全屏编辑退掉。
+  const fsBtn = document.getElementById('btnFullscreen');
+  if (fsBtn) fsBtn.addEventListener('click', function () { if (isOn()) apply(false); });
+
+  // Esc 退出。弹窗打开时不动 —— 那会儿 Esc 的语义是「关弹窗」，不该顺手把全屏也退了。
+  // Mermaid 放大浮层的 Esc 走捕获阶段并且 stopImmediatePropagation，到不了这里。
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape' || !isOn()) return;
+    if (document.querySelector('.modal-overlay.show')) return;
+    apply(false);
+  });
 })();

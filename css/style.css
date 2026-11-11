@@ -1984,3 +1984,87 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .tree-btn.is-busy svg { animation: none; }
 }
+
+/* ===== 文件树悬浮球：右上角的「彻底关闭」=====
+   收起抽屉 → 球留下，这是「怎么找回来」的答案；但「我不想看见它」也是真需求，
+   所以球上挂一枚 ×：点了球和抽屉一起消失，唤回入口是顶栏「打开 → 文件夹」（本来就是开关）。
+   ⛔ 别再给它加 hover 才显示 —— 触屏没有 hover，那就等于手机上永远关不掉。
+   尺寸压到 18px 且整枚落在球的圆内，避免挡住拖动时的抓取手感。 */
+.peek-close {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  /* 白底按钮压在白色编辑区上时，--border-strong（#cbd5e1）几乎看不见 —— 那圈白就散掉了；
+     换成半透明深色描边，压在蓝球上和压在白纸上都能描出「这是一枚圆形按钮」 */
+  border: 1px solid rgba(15, 23, 42, .22);
+  border-radius: 50%;
+  background: #ffffff;
+  /* 比 --text-secondary 再深一档：这枚 × 只有 9px 大，压在实心蓝球旁的白底上，
+     淡一分就成了「一个白点」——看得见但认不出是什么 */
+  color: #4b5563;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .18);
+  transition: background .15s ease, color .15s ease, border-color .15s ease;
+}
+/* 叉号用 SVG 而不是 &times; 字体符号：12px 的字体符号只有约 6px 是墨，
+   1x 屏上糊成一团；9px 的 1.8px 描边才是真正「看得出来的两个交叉笔画」 */
+.peek-close svg {
+  display: block;
+  pointer-events: none;
+}
+.peek-close:hover {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #ffffff;
+}
+
+/* ===== 全屏编辑（专注写作）=====
+   目标只有一个：把「写」这件事从两块分栏里拿出来。顶栏 / 预览 / 分隔条 / 文件树（抽屉 + 球）/
+   目录大纲（面板 + 球）全部让位，编辑区独占视口；工具栏与状态栏留着 —— 排版按钮和字数统计
+   是写作时真会用到的东西，一起藏掉反而要退出全屏才能按一下。
+   ⛔ 全部用 CSS 完成，不改任何既有 JS 状态：退出时只是把 body 上这一个 class 摘掉，
+      别的什么都不用复原（也就不会复原错）。别改成 JS 逐个写 style.display —— 那得记住
+      每个元素原本的 display，漏一个就是「退出后少了一块」。 */
+body.is-editing-focus .app-header,
+body.is-editing-focus .preview-panel,
+body.is-editing-focus .resizer,
+body.is-editing-focus .file-tree-panel,
+body.is-editing-focus .tree-peek,
+body.is-editing-focus .outline-panel {
+  display: none !important;
+}
+
+/* 分栏拖拽写的是 inline flex，只有 !important 压得住（否则窄分栏会在全屏里留一条空白） */
+body.is-editing-focus .editor-panel {
+  flex: 1 1 auto !important;
+  border-right: none;
+}
+
+/* 居中版心：宽屏下一行 100+ 字符很难读，靠 padding 收出约 860px 的文本列，
+   字号与行高按原样不动 —— 全屏是「更专注」，不是「换一种排版」。 */
+body.is-editing-focus .editor {
+  padding: 32px max(24px, calc((100% - 860px) / 2));
+}
+
+/* 全屏编辑时按钮自己就是「退出」：顶栏藏了，它是屏幕上唯一说明「现在处于什么状态」的东西 */
+#btnFocus.active {
+  color: var(--accent);
+  background: var(--accent-light);
+}
+#btnFocus.active:hover {
+  background: var(--bg-active);
+}
+
+/* 打印必须让预览回来：@media print 里 .preview-panel 只是普通 display:block，
+   而上面那条 !important 会把它压掉 —— 全屏编辑中按 Ctrl+P 会打出白纸。 */
+@media print {
+  body.is-editing-focus .preview-panel {
+    display: block !important;
+  }
+}

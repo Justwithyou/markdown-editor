@@ -78,10 +78,10 @@
       </button>
     </div>
     <div class="header-right">
-      <!-- 「打开」下拉：把「文件 / 文件夹」两个入口收进一个菜单，顶栏不再横向膨胀。
-           刻意复用 .export-wrap / .export-menu / .export-item —— 与导出下拉共用同一套骨架，
+      <!-- 「打开」下拉：把「文件 / 文件夹」两个入口收进一个菜单，顶栏不再横向膨胀。刻意复用
+           .export-wrap / .export-menu / .export-item —— 与导出下拉共用同一套骨架，
            样式表里只补 active 与 [hidden] 两条规则。
-           #btnOpenFolder 仍带 hidden：不支持相关 API 的浏览器里由 app.js 把整个节点摘掉；
+           #btnOpenFolder 仍带 hidden：不支持相关 API 的浏览器里由 app.js 把节点摘掉；
            连它都没了的时候（Firefox / Safari），菜单只剩「文件」一项，箭头由 JS 收掉。 -->
       <div class="export-wrap" id="openWrap">
         <button class="header-btn" id="btnOpen" title="打开本地文件 / 文件夹" aria-haspopup="menu" aria-expanded="false">
@@ -147,8 +147,7 @@
           </button>
         </div>
       </div>
-      <!-- 复制的是「内联样式 + 已剥掉预览档位」的富文本，唯一落点是微信公众号编辑器。
-           所以按钮上直接挂一枚微信标识：图标比一行说明更早被看见，也不会多占顶栏宽度。 -->
+      <!-- 复制的是「内联样式 + 已剥掉预览档位」的富文本，唯一落点是微信公众号编辑器：所以按钮上直接挂一枚微信标识，图标比一行说明更早被看见，也不会多占顶栏宽度 -->
       <button class="header-btn primary" id="btnCopy" title="复制富文本，粘贴到微信公众号（保留内联样式）">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         <span>复制</span>
@@ -229,6 +228,7 @@
           <button class="tool-btn" id="btnUrlFetch" title="URL 链接采集">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
           </button>
+          <button class="tool-btn" id="btnFocus" title="全屏编辑：只留编辑器，专注写作（Esc 退出）" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg></button>
           <button class="tool-btn" id="btnClear" title="清空内容">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
           </button>
@@ -469,15 +469,15 @@
     <div class="tree-resizer" id="treeResizer" title="拖动调整宽度"></div>
   </div>
 
-  <!-- 抽屉收起后的入口：一枚**可拖动的悬浮球**。
-       只在「已经打开过工作区 + 抽屉处于收起」时出现 —— 把「隐藏之后怎么找回来」
-       变成一个一眼可见、还能随手挪开的动作，而不是让人记得去顶栏菜单里翻。
-       实心主题蓝打底，按下的那一下切成橙色（见 style.css 的 .tree-peek.pressing）——
-       颜色变化就是「点到了」的反馈，不必再配一行文字说明。
-       位置由 JS 写内联 left/top 并记进 localStorage；不支持文件夹 API 时与抽屉一起被摘掉。 -->
-  <button class="tree-peek" id="treePeek" hidden title="展开文件树（可拖动）" aria-label="展开文件树">
+  <!-- 抽屉收起后的入口：一枚**可拖动的悬浮球**（实心主题蓝，按下切橙，位置记进 localStorage；
+       只在「打开过工作区 + 抽屉收起」时出现 —— 把「隐藏之后怎么找回来」变成一个一眼可见、
+       还能随手挪开的动作）。右上角那枚 × 是「彻底关闭」：球也一起收掉，之后从顶栏
+       「打开 → 文件夹」唤回（那本来就是开关）。它得是 div 而不是 button —— × 是里面第二枚
+       真正的按钮，button 套 button 是非法 HTML。不支持文件夹 API 时整块摘掉。 -->
+  <div class="tree-peek" id="treePeek" hidden role="button" tabindex="0" title="展开文件树（可拖动；右上角 × 彻底关闭）" aria-label="展开文件树">
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.4.6L11.4 7H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
-  </button>
+    <button type="button" class="peek-close" id="treePeekClose" title="关闭文件树（连悬浮球一起收掉）" aria-label="关闭文件树"><svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7"/></svg></button>
+  </div>
 
   <!-- Floating Outline Panel -->
   <div class="outline-panel" id="outlinePanel">
