@@ -152,8 +152,8 @@ python -m http.server 20001   # 或：npx serve . -l 20001
 ```
 markdown-editor/
 ├── index.html        # 页面结构 + CDN 引入 + 图标与 manifest 声明（506 行）
-├── css/style.css     # 全部样式，含 2 套主题与打印样式（2070 行）
-├── js/app.js         # 全部逻辑：渲染、复制、导出、文件树、大纲等（4080 行）
+├── css/style.css     # 全部样式，含 2 套主题与打印样式（2123 行）
+├── js/app.js         # 全部逻辑：渲染、复制、导出、文件树、大纲等（4108 行）
 ├── Markdown.ico      # 图标源文件（六帧 16–256），页头与标签页共用
 ├── icon-192.png      # PWA 图标，由 Markdown.ico 派生
 ├── icon-512.png      #   同上

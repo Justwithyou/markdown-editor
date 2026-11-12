@@ -58,9 +58,9 @@ markdown-editor/
 ├── icon-192.png      # PWA 图标 192×192，由 Markdown.ico 的 256 帧派生
 ├── icon-512.png      # PWA 图标 512×512，同上（放大得到）
 ├── css/
-│   └── style.css     # 全部样式：2 套主题 + 布局 + 弹窗 + 水印 + 元数据 + 设备档预览 + 文件树抽屉 + 打开与导出下拉 + 打印 + 滚动条 + Mermaid 放大浮层 + 复制按钮的微信标识 + 顶栏 GitHub 入口 + 目录大纲收起悬浮球 + 采集进行中态 + 文件树刷新中态 + 悬浮球关闭徽标 + 全屏编辑（2070 行）
+│   └── style.css     # 全部样式：2 套主题 + 布局 + 弹窗 + 水印 + 元数据 + 设备档预览 + 文件树抽屉 + 打开与导出下拉 + 打印 + 滚动条 + Mermaid 放大浮层 + 复制按钮的微信标识 + 顶栏 GitHub 入口 + 目录大纲收起悬浮球 + 采集进行中态 + 文件树刷新中态 + 悬浮球关闭徽标 + 全屏编辑（2123 行）
 ├── js/
-│   └── app.js        # 全部逻辑：解析/渲染/大纲/水印/模板/元数据/复制/导出/导出 PDF/设备档预览/文件夹模式/滚动条悬停放大/Mermaid 放大浮层 + 顶栏下拉互斥 + 派生目录 + URL 采集通道链 + launchQueue 接收系统交付的文件 + 全屏编辑（4080 行）
+│   └── app.js        # 全部逻辑：解析/渲染/大纲/水印/模板/元数据/复制/导出/导出 PDF/设备档预览/文件夹模式/滚动条悬停放大/Mermaid 放大浮层 + 顶栏下拉互斥 + 派生目录 + URL 采集通道链 + launchQueue 接收系统交付的文件 + 全屏编辑（4108 行）
 ├── README.md         # 项目说明（GitHub 标准格式）
 ├── ROADMAP.md        # 未来功能升级路线（独立文档）
 ├── DESIGN.md         # 本文档
@@ -245,7 +245,7 @@ preview.innerHTML = html  ← 写入预览区
 - **双向同步滚动**：编辑区与预览区按滚动比例互相映射，可关闭（`#btnPreviewScroll`）。
 - **代码高亮**：marked `highlight` 回调 → `hljs.highlight / highlightAuto`。
 - **数学公式**：KaTeX auto-render，支持 `$...$` / `$$...$$` / `\(...\)` / `\[...\]`。
-- **Mermaid**：识别 `code.language-mermaid`，异步渲染为内联 SVG（`renderMermaidFromDOM()`，app.js:602）。**图内排版度量必须"回钉"**：mermaid 先用**字体原生的 `normal` 行高**（16px 字号下 trebuchet ms ≈19px/行、中文字体回退 ≈24px/行）把节点框与 `foreignObject` 量好，再把文字画进同样大小的框里——**超出部分会被直接裁掉**。而主题与设备档的行高 / 字距 / 字体是继承下来的，会顺着 SVG 漏进 `foreignObject` 里的标签 div，把文字撑得比框更高更宽 → 每个节点的字被切掉一截（APP 档最明显：行高 1.75 + 字距 +.5px，纵向裁 4px、横向最宽裁 12px）。⚠️ **钉固定倍数同样错**：行高 1.5 对中文恰好等于其量算值、对拉丁文却每行多 5px（24 vs 19），两行标签就裁 10px（2026-10-15 二修）。修法是把 SVG 内部的度量钉回 mermaid 的**量算条件**（16px / `normal` / 无字距 / 无外边距），四处平行：`style.css` 的 `.mermaid-rendered svg *` + 三个产物（导出 HTML / 复制公众号 / 导出 Word）共用的 `MERMAID_LOCK_CSS`（app.js:1082）。
+- **Mermaid**：识别 `code.language-mermaid`，异步渲染为内联 SVG（`renderMermaidFromDOM()`，app.js:626）。**语法写错时错误只落在代码块原位**：mermaid 10 渲染失败会把「炸弹 + `Syntax error in text`」这张错误图**追加到 body 末尾且不回收**，id 每次自增 → 每错一次多一坨、改对了也不消失（用户 2026-11-12 报的就是它）。现在每张图收尾（成功 / 失败都算）按自己的 id 精确摘掉那个临时壳（`dropMermaidStray()`，app.js:611），并把 mermaid 原话（含行号）渲染成正文里的 `.mermaid-error` 卡片。**图内排版度量必须"回钉"**：mermaid 先用**字体原生的 `normal` 行高**（16px 字号下 trebuchet ms ≈19px/行、中文字体回退 ≈24px/行）把节点框与 `foreignObject` 量好，再把文字画进同样大小的框里——**超出部分会被直接裁掉**。而主题与设备档的行高 / 字距 / 字体是继承下来的，会顺着 SVG 漏进 `foreignObject` 里的标签 div，把文字撑得比框更高更宽 → 每个节点的字被切掉一截（APP 档最明显：行高 1.75 + 字距 +.5px，纵向裁 4px、横向最宽裁 12px）。⚠️ **钉固定倍数同样错**：行高 1.5 对中文恰好等于其量算值、对拉丁文却每行多 5px（24 vs 19），两行标签就裁 10px（2026-10-15 二修）。修法是把 SVG 内部的度量钉回 mermaid 的**量算条件**（16px / `normal` / 无字距 / 无外边距），四处平行：`style.css` 的 `.mermaid-rendered svg *` + 三个产物（导出 HTML / 复制公众号 / 导出 Word）共用的 `MERMAID_LOCK_CSS`（app.js:1110）。
 - **GFM 语法**：表格、任务列表、删除线、引用等由 marked 原生支持。
 
 ### 6.2 微信排版（核心场景）
@@ -310,18 +310,18 @@ preview.innerHTML = html  ← 写入预览区
 | 预览 | `buildWatermarkUrl()` | 生成 SVG data URI 作 CSS 平铺背景 | 性能好、不污染 DOM |
 | 复制 | `injectWatermarkNodes()` | 绝对定位 `<span>` 平铺铺满容器 | 微信会过滤 SVG data URI 背景，DOM 节点粘贴后更易存活 |
 
-### 7.4 富文本复制（`copyToClipboard()`，app.js:941）
+### 7.4 富文本复制（`copyToClipboard()`，app.js:969）
 
 克隆预览 → **摘掉 `[data-fm-ui]` 元数据标题行** → 清空背景 → 注入 `getThemeStyles(theme)` 的 `<style>` 块 → 注入 DOM 水印 → `Range` 选区 + `execCommand('copy')`，失败则降级为纯文本复制。用废弃但兼容性最好的 `execCommand` 实现富文本复制。
 
-### 7.5 大纲双向联动（app.js:1827–2089）
+### 7.5 大纲双向联动（app.js:1855–2117）
 
 - `getSourceHeadings()`：扫描源码 ATX 标题（跳过围栏代码块）记录行号。
 - `buildOutline()`：把预览区 `<h1..h6>` 通过「层级 + 归一化文本」匹配回源码行号。
 - 点击跳转：编辑器用镜像 div 测量行偏移后平滑滚动；预览区用 `getBoundingClientRect` 差值滚动。
 - `suppressSync(600)`：跳转期间临时关闭双向同步，避免两栏互相拉扯。
 
-### 7.6 同步滚动（app.js:1553 起）
+### 7.6 同步滚动（app.js:1581 起）
 
 编辑区与预览区滚动事件互相映射，按 `scrollTop / (scrollHeight - clientHeight)` 比例同步；`syncBlocked()` 判断抑制窗口。**真正的滚动容器是 `#previewWrap`**（`overflow:auto` 在它身上），不是 `#previewScroll`。
 
@@ -351,29 +351,29 @@ preview.innerHTML = html  ← 写入预览区
 
 **为什么不用现成的树查看器**：Obsidian 的 `nested-properties` / `nested-frontmatter-properties` 都依赖 Obsidian 内部 API，不能用于独立网页；Front Matter CMS 是 VS Code 扩展工程；通用 JSON 树查看器（JsonTree.js、`@vdonec/json-view`、tree.json）虽然是 CDN 可引入的 UMD，但观感是「代码调试器」，且**输出 class 样式**——与「元数据必须内联样式才能在公众号存活」这条硬约束直接冲突，也不认 YAML 语义类型。结论是只借交互模型、渲染自己写，代价约 30 行递归，换来零新增依赖。
 
-### 7.8 导出能力（`// ===== Export (F1) =====`，app.js:1041–1328；`// ===== 导出 PDF（下载）=====`，app.js:1330–1496）
+### 7.8 导出能力（`// ===== Export (F1) =====`，app.js:1069–1356；`// ===== 导出 PDF（下载）=====`，app.js:1358–1524）
 
-顶栏「复制」**左侧**新增**「导出」下拉**（`index.html:118–149`，样式 `style.css:181–282`），把五个动作收进一个菜单，避免顶栏按钮继续横向膨胀。除「打印」外的四个动作全部通过**浏览器下载**落盘（`Blob` + `URL.createObjectURL` + `<a download>`），不经过任何服务端；**零新增运行时依赖**——`html2canvas` / `jsPDF` 只在第一次点「导出 PDF」时才从 CDN 拉（`loadScriptOnce()` app.js:1341 + `ensureLib()` app.js:1360）。
+顶栏「复制」**左侧**新增**「导出」下拉**（`index.html:118–149`，样式 `style.css:181–282`），把五个动作收进一个菜单，避免顶栏按钮继续横向膨胀。除「打印」外的四个动作全部通过**浏览器下载**落盘（`Blob` + `URL.createObjectURL` + `<a download>`），不经过任何服务端；**零新增运行时依赖**——`html2canvas` / `jsPDF` 只在第一次点「导出 PDF」时才从 CDN 拉（`loadScriptOnce()` app.js:1369 + `ensureLib()` app.js:1388）。
 
 | 动作 | `data-export` | 实现 | 产物 |
 |---|---|---|---|
 | 复制 Markdown | `md` | `navigator.clipboard.writeText(editor.value)`，失败降级 `document.execCommand('copy')` | 剪贴板（纯文本） |
-| 导出 HTML | `html` | `buildStandaloneHtml()`（app.js:1191）→ `downloadBlob()` | `text/html` / `.html` |
-| 导出 PDF | `pdf` | `exportPdfFile()`（app.js:1390）：离屏渲染 → A4 切片 → `jsPDF.addImage` → `downloadBlob()` | `application/pdf` / `.pdf`（**直接下载**） |
-| 导出 Word | `word` | `buildWordHtml()`（app.js:1253）→ `downloadBlob()` | `application/msword` / `.doc` |
-| 打印 | `print` | `printDocument()`（app.js:1324）＝ `window.print()` + `@media print` | 系统打印对话框（可选「另存为 PDF」） |
+| 导出 HTML | `html` | `buildStandaloneHtml()`（app.js:1219）→ `downloadBlob()` | `text/html` / `.html` |
+| 导出 PDF | `pdf` | `exportPdfFile()`（app.js:1418）：离屏渲染 → A4 切片 → `jsPDF.addImage` → `downloadBlob()` | `application/pdf` / `.pdf`（**直接下载**） |
+| 导出 Word | `word` | `buildWordHtml()`（app.js:1281）→ `downloadBlob()` | `application/msword` / `.doc` |
+| 打印 | `print` | `printDocument()`（app.js:1352）＝ `window.print()` + `@media print` | 系统打印对话框（可选「另存为 PDF」） |
 
 **「导出 PDF」与「打印」为什么拆成两条路。** 原先只有一条（`window.print()`），菜单里却叫「导出 PDF」，用户点下去得到的是一个打印对话框，认知落差大。现在按**产物形态**分开：
 
-- **导出 PDF（下载）**：`exportPdfFile()` 把 `clonePreviewForExport()` 挂到一个 900px 宽的离屏舞台（`PDF_STAGE_W` app.js:1371），`html2canvas` 出整张长图 → 按 A4 可用高度（`PDF_USABLE_H` app.js:1370，A4 高 841.89pt 减上下各 24pt 边距）逐段切片 → `findBlankCut()`（app.js:1375）在目标切点附近向下找一行**全白**像素再切，避免把一行字拦腰截断 → 每片 `canvas.toDataURL('image/jpeg', 0.92)` → `pdf.addImage(..., 'JPEG', …)`。点一下就拿到文件。
+- **导出 PDF（下载）**：`exportPdfFile()` 把 `clonePreviewForExport()` 挂到一个 900px 宽的离屏舞台（`PDF_STAGE_W` app.js:1399），`html2canvas` 出整张长图 → 按 A4 可用高度（`PDF_USABLE_H` app.js:1398，A4 高 841.89pt 减上下各 24pt 边距）逐段切片 → `findBlankCut()`（app.js:1403）在目标切点附近向下找一行**全白**像素再切，避免把一行字拦腰截断 → 每片 `canvas.toDataURL('image/jpeg', 0.92)` → `pdf.addImage(..., 'JPEG', …)`。点一下就拿到文件。
   - **代价必须说清**：PDF 里是图片，**文字不可选中、不可检索**；这条写进了 Toast 与 README「已知限制」。
   - **像素密度自适应**：浏览器对画布总面积有上限，超了会静默失败或出白纸。渲染前先估面积，`scale` 依次降 2 → 1.5 → 1；连 1 倍都放不下就**明确拒绝并提示改用「打印」**，绝不交出一份被截断的文档。
   - **体积教训**：最初用 PNG 切片，10 页 68 MB；改为 `getContext('2d', { alpha: false })`（省掉 alpha 通道）+ JPEG 0.92 后，同样内容约 1.1 MB。
 - **打印**：仍是原来的 `printDocument()` → `window.print()`，输出**矢量、文字可选**，只是不再对外宣称是「导出 PDF」；需要在对话框里选「另存为 PDF」，这一步现在由用户自己决定。
 
-`runExport(kind)`（app.js:1479）负责分发：`'print' → printDocument()`、`'pdf' → exportPdfFile()`，其余保持原下载路径。
+`runExport(kind)`（app.js:1507）负责分发：`'print' → printDocument()`、`'pdf' → exportPdfFile()`，其余保持原下载路径。
 
-**导出 HTML 的自包含性（`buildStandaloneHtml()`，app.js:1191）。** 组装顺序有语义，已被静态断言锁定：
+**导出 HTML 的自包含性（`buildStandaloneHtml()`，app.js:1219）。** 组装顺序有语义，已被静态断言锁定：
 
 ```
 EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / KaTeX）
@@ -383,12 +383,12 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 三点必须记住：
 
 1. **外壳样式必须排在主题样式之前**。主题样式会在 `body, div` 上声明背景色；外壳（`body { margin: 0; padding: 24px 16px }` 等）若排在后面，深色文档会变成「白底浅字」。
-2. **CSS 里的 `url()` 必须绝对化**（`absolutizeCssUrls()`，app.js:1156）。KaTeX 的 `@font-face` 写的是 `url(fonts/KaTeX_*.woff2)`，内联后相对路径会以**导出文件所在目录**为基准 → 字体全 404、公式退回系统字体。白名单跳过 `data:` / `http(s):` / `//` / `#`。
-3. **取不到就回退，不能静默丢**。`readCssText()`（app.js:1129）先走 CSSOM（`document.styleSheets[i].cssRules`，跨域读会抛 `SecurityError`），再走 `fetch(href, { mode: 'cors' })`；两条都失败时 `collectExportCss()` 把 href 记进 `fallback`，最终渲染成 `<link rel="stylesheet" href="https://…">`。取到的文本缓存在 `exportCssCache`（app.js:1128），避免两次导出重复拉取。
+2. **CSS 里的 `url()` 必须绝对化**（`absolutizeCssUrls()`，app.js:1184）。KaTeX 的 `@font-face` 写的是 `url(fonts/KaTeX_*.woff2)`，内联后相对路径会以**导出文件所在目录**为基准 → 字体全 404、公式退回系统字体。白名单跳过 `data:` / `http(s):` / `//` / `#`。
+3. **取不到就回退，不能静默丢**。`readCssText()`（app.js:1157）先走 CSSOM（`document.styleSheets[i].cssRules`，跨域读会抛 `SecurityError`），再走 `fetch(href, { mode: 'cors' })`；两条都失败时 `collectExportCss()` 把 href 记进 `fallback`，最终渲染成 `<link rel="stylesheet" href="https://…">`。取到的文本缓存在 `exportCssCache`（app.js:1156），避免两次导出重复拉取。
 
-导出前先 `clonePreviewForExport()`（app.js:1117）克隆预览子树，并摘掉三类**属于应用 UI、不该进导出文件**的东西：行内残留的 `style` 属性（如方格背景）、`grid-bg` class，以及 `data-page-node-id` 这类**编辑器专用属性**。元数据 YAML 原文则以 HTML 注释保留（`exportFrontMatterComment()`，app.js:1186），方便拿到文件后二次编辑。
+导出前先 `clonePreviewForExport()`（app.js:1145）克隆预览子树，并摘掉三类**属于应用 UI、不该进导出文件**的东西：行内残留的 `style` 属性（如方格背景）、`grid-bg` class，以及 `data-page-node-id` 这类**编辑器专用属性**。元数据 YAML 原文则以 HTML 注释保留（`exportFrontMatterComment()`，app.js:1214），方便拿到文件后二次编辑。
 
-> **`data-page-node-id` 是什么？** 这份 `index.html` 一旦托管成 WorkBuddy 资料库的「页面」，页面平台就会给每个元素打上这个东西（内部叫 `pnid`），用于**节点级评论**与**「划词让 AI 改」的改动定位**（见内置 `library` 技能的 `page/edit-flow.md`）。它对运行没有任何影响，但会随 `preview.cloneNode(true)` 混进公众号与导出文件。**2026-10-13 已确认项目里零处读取它，整批清除了 312 处**；`stripEditorOnlyAttrs()`（app.js:919）留在 `copyToClipboard()`（app.js:942）与 `clonePreviewForExport()`（app.js:1117）两条克隆路径上做防御——文件若再被托管回资料库，属性会重新出现。ex-test 有一条「手动注入 pnid → 导出应剥掉」的用例锁着这段逻辑。
+> **`data-page-node-id` 是什么？** 这份 `index.html` 一旦托管成 WorkBuddy 资料库的「页面」，页面平台就会给每个元素打上这个东西（内部叫 `pnid`），用于**节点级评论**与**「划词让 AI 改」的改动定位**（见内置 `library` 技能的 `page/edit-flow.md`）。它对运行没有任何影响，但会随 `preview.cloneNode(true)` 混进公众号与导出文件。**2026-10-13 已确认项目里零处读取它，整批清除了 312 处**；`stripEditorOnlyAttrs()`（app.js:947）留在 `copyToClipboard()`（app.js:970）与 `clonePreviewForExport()`（app.js:1145）两条克隆路径上做防御——文件若再被托管回资料库，属性会重新出现。ex-test 有一条「手动注入 pnid → 导出应剥掉」的用例锁着这段逻辑。
 
 **打印样式（`style.css:1758–1842`），六组规则：**
 
@@ -401,16 +401,16 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 
 另有 `@page { margin: 16mm }` 放在 `@media print` **之外**（`style.css:1758`，`@media print` 从 `:1759` 起）——`@page` 本身就是页面级 at-rule，放外面更直观，两条规则都有断言盯着。
 
-**导出 Word 的兼容性子集（`buildWordHtml()`，app.js:1253）。** `application/msword` + `.doc` 套壳，本质仍是 HTML。Word / WPS 只认一小撮 CSS，因此：
+**导出 Word 的兼容性子集（`buildWordHtml()`，app.js:1281）。** `application/msword` + `.doc` 套壳，本质仍是 HTML。Word / WPS 只认一小撮 CSS，因此：
 
-- **不认 `em`**：`WORD_COMPAT_CSS`（app.js:1064）一律用 `pt`（正文 12pt、h1 20pt、h2 16pt、h3 14pt、`pre` 10pt）
-- **不认 flex**：元数据面板经 `fmPanelToTable()`（app.js:1215）降级为 `<tr><td>键</td><td>值</td></tr>`，`.fm-row` 递归摊平，嵌套层级用缩进表达
+- **不认 `em`**：`WORD_COMPAT_CSS`（app.js:1092）一律用 `pt`（正文 12pt、h1 20pt、h2 16pt、h3 14pt、`pre` 10pt）
+- **不认 flex**：元数据面板经 `fmPanelToTable()`（app.js:1243）降级为 `<tr><td>键</td><td>值</td></tr>`，`.fm-row` 递归摊平，嵌套层级用缩进表达
 - **MSO 头**：`<w:WordDocument><w:View>Print</w:View>` + `@page WordSection1`，让 Word 以「页面视图」而非「Web 版式」打开
 - **不带水印**：水印的两条实现（SVG data URI 背景 / 绝对定位 `<span>`）在 Word 里都不可靠，索性不写入
 
-**文件名规则（`getDocBaseName()`，app.js:1111）。** 优先取元数据 `title` → 正文首个 H1 → 兜底 `document`；再过 `sanitizeFileName()`（app.js:1098）清洗 Windows 非法字符（`\ / : * ? " < > |`）、剥掉 Markdown 强调标记与 `[文字](链接)` 的链接部分，并截断到 80 字符。
+**文件名规则（`getDocBaseName()`，app.js:1139）。** 优先取元数据 `title` → 正文首个 H1 → 兜底 `document`；再过 `sanitizeFileName()`（app.js:1126）清洗 Windows 非法字符（`\ / : * ? " < > |`）、剥掉 Markdown 强调标记与 `[文字](链接)` 的链接部分，并截断到 80 字符。
 
-**顺带修复的既有回归：`unfoldDisplayMath()`（app.js:642）。** `breaks: true` 会把段落内换行变成 `<br>`，于是多行写的块级公式在 DOM 里成了 `<p>$$<br>\int…<br>$$</p>`。KaTeX 的 auto-render 按**文本节点**匹配定界符，`$$` 被 `<br>` 拆成多个文本节点后就再也配不上——**整个块级公式不渲染**（行内 `$x$` 不跨行，因此不受影响）。修复：`renderMath()`（app.js:651）开头先调 `unfoldDisplayMath()`，对「整段就是一个块级公式」（`$$…$$` 或 `\[…\]`）的段落把 `<br>` 换回 `\n`，合回单个文本节点。
+**顺带修复的既有回归：`unfoldDisplayMath()`（app.js:670）。** `breaks: true` 会把段落内换行变成 `<br>`，于是多行写的块级公式在 DOM 里成了 `<p>$$<br>\int…<br>$$</p>`。KaTeX 的 auto-render 按**文本节点**匹配定界符，`$$` 被 `<br>` 拆成多个文本节点后就再也配不上——**整个块级公式不渲染**（行内 `$x$` 不跨行，因此不受影响）。修复：`renderMath()`（app.js:679）开头先调 `unfoldDisplayMath()`，对「整段就是一个块级公式」（`$$…$$` 或 `\[…\]`）的段落把 `<br>` 换回 `\n`，合回单个文本节点。
 
 ---
 
@@ -440,9 +440,9 @@ EXPORT_PAGE_CSS → getThemeStyles(state.theme) → 内联的 CDN CSS（hljs / K
 </div>
 ```
 
-事件用**委托**挂在组上（`#deviceGroup` 一个 `click` 监听，`e.target.closest('.seg-btn')` 取档位），HTML 里加档位只需加一个 `data-device` 按钮，JS 不用动。选中态由 `syncSegBtns()`（app.js:893）统一同步：同时维护 `.active` 与 `aria-pressed`，样式与读屏共用一份真相。
+事件用**委托**挂在组上（`#deviceGroup` 一个 `click` 监听，`e.target.closest('.seg-btn')` 取档位），HTML 里加档位只需加一个 `data-device` 按钮，JS 不用动。选中态由 `syncSegBtns()`（app.js:921）统一同步：同时维护 `.active` 与 `aria-pressed`，样式与读屏共用一份真相。
 
-**三、class 的单出口拼装（`syncPreviewClass()`，app.js:854）。** 预览容器的 class 由「主题 + 方格背景 + 设备档」三件事共同决定：
+**三、class 的单出口拼装（`syncPreviewClass()`，app.js:882）。** 预览容器的 class 由「主题 + 方格背景 + 设备档」三件事共同决定：
 
 ```js
 preview.className = [
@@ -482,7 +482,7 @@ preview.className = [
 
 iPad 档则相反，**不套**公众号那套字距与折行——它模拟的是「在平板上浏览网页」，所以保持 Web 排版，只把正文放大到 17px、行高放宽到 1.7、内边距加宽，并按平板屏宽收一点标题字号。
 
-**七、模式类不进产物（`stripPreviewModeClasses()`，app.js:931）。** `device-*` 是**观察工具**，不是文章内容：模拟出来的版心与字号若被当成真实排版带进公众号或导出文件，就是错的。它和方格背景、`data-page-node-id` 一样，在**两条克隆路径**（`copyToClipboard()` app.js:942、`clonePreviewForExport()` app.js:1117）上被摘掉：
+**七、模式类不进产物（`stripPreviewModeClasses()`，app.js:959）。** `device-*` 是**观察工具**，不是文章内容：模拟出来的版心与字号若被当成真实排版带进公众号或导出文件，就是错的。它和方格背景、`data-page-node-id` 一样，在**两条克隆路径**（`copyToClipboard()` app.js:970、`clonePreviewForExport()` app.js:1145）上被摘掉：
 
 ```js
 const cloned = stripPreviewModeClasses(stripEditorOnlyAttrs(preview.cloneNode(true)));
@@ -500,7 +500,7 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 
 **九、全屏 = 锁定当前档位。** 全屏是「安静读」的场景，进去之后不该还能来回切档。`enterFullscreen()` 做三件事：把设备档整组（`#previewModeGroup`）`display:none`；**页宽组只在 PC 档显示**——iPad / APP 的版心由 `--dev-max` 决定，而页宽走的是 inline `max-width`，叠上去会直接压掉版心，两者互相打架，所以非 PC 档索性不给；进入前是 iPad / APP 档时，把上一次遗留的 inline `max-width` 与 `page-mode` 清掉，**把版心交还给设备档**。`.device-*` class 一直挂在 `#preview` 上、全屏期间不动，所以「按当前档位渲染」不需要额外代码。退出全屏（按钮或 `Esc`）再把这几个 `display` 还原。
 
-`applyDevice()`（app.js:903）负责落盘（`mdtu-device`）、同步按钮激活态（`syncSegBtns()`）与 `previewScroll.classList.toggle('device-frame', …)`（非 PC 档压深底衬，设备边界才看得见）；`init()` 里用 `pickSaved()` 校验存档值后套用。**切换不弹 Toast**：档位本身就写着 `PC` / `iPad` / `APP`、按钮高亮即选中态，变的是正文本身；再弹一个浮层挡住正文并停留 2.5s，是纯粹的信息噪声。工具栏上也不写「设备」二字——三个档位自明，多一个标签只是占掉横向空间。
+`applyDevice()`（app.js:931）负责落盘（`mdtu-device`）、同步按钮激活态（`syncSegBtns()`）与 `previewScroll.classList.toggle('device-frame', …)`（非 PC 档压深底衬，设备边界才看得见）；`init()` 里用 `pickSaved()` 校验存档值后套用。**切换不弹 Toast**：档位本身就写着 `PC` / `iPad` / `APP`、按钮高亮即选中态，变的是正文本身；再弹一个浮层挡住正文并停留 2.5s，是纯粹的信息噪声。工具栏上也不写「设备」二字——三个档位自明，多一个标签只是占掉横向空间。
 
 ---
 
@@ -610,7 +610,7 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 
 **换行语义。** `marked.setOptions({ breaks: true })`——源码中单个换行渲染为 `<br>`，与 GFM 默认的「折成空格」不同。取舍理由：本工具面向公众号排版，中文作者习惯一行一句、且不做硬换行；同类的 [doocs/md](https://github.com/doocs/md)（同样基于 marked）也是 `breaks: true`。代价是英文硬换行的段落会按折行位置断行，全文仅在 `js/app.js:307` 一处可切回 `false`。该语义对引用块与普通段落一致，没有做分叉。
 
-复制到公众号时，另有一套内联样式 `getThemeStyles(theme)`（app.js:1002），用于把主题样式随富文本一起带出（与 style.css 的主题类平行维护）。
+复制到公众号时，另有一套内联样式 `getThemeStyles(theme)`（app.js:1030），用于把主题样式随富文本一起带出（与 style.css 的主题类平行维护）。
 
 > 第 3 份平行维护的是**元数据配色** `FM_PALETTE`（app.js:341，另含图标路径表 `FM_ICON_PATHS`）：它不走 `getThemeStyles()`，而是把颜色直接写进元数据面板的内联 style，原因见 7.7。
 
@@ -681,13 +681,13 @@ ex-test 断言导出产物中不含 `device-`，且容器类只剩 `markdown-bod
 - **水印双路径**：`buildWatermarkUrl()`（预览）与 `injectWatermarkNodes()`（复制）需同步维护。
 - **元数据的剥离时机**：`splitFrontMatter()` 必须在 `marked.parse()` 之前调用，否则元数据会被渲染成 `<hr>` + 一个吞掉全部元数据的假 `<h2>`。
 - **js-yaml 的 schema**：解析元数据必须传 `CORE_SCHEMA`，默认 schema 会把 `date: 2026-09-20` 变成 `Date` 对象（东八区显示成前一天）。
-- **导出样式平行**：导出 HTML / Word 用的外壳样式（`EXPORT_PAGE_CSS`，app.js:1049；`WORD_COMPAT_CSS`，app.js:1064）与 `getThemeStyles()`、`style.css` 的主题类构成第 4 处平行——改主题色时同样要顾及（详见 7.8）。
-- **元数据配色三处平行**：`FM_PALETTE`（内联样式，app.js:341）、`getThemeStyles()`（复制用内联样式，app.js:1002）、`style.css` 的 `.theme-*`——改主题色时都要顾及。
+- **导出样式平行**：导出 HTML / Word 用的外壳样式（`EXPORT_PAGE_CSS`，app.js:1077；`WORD_COMPAT_CSS`，app.js:1092）与 `getThemeStyles()`、`style.css` 的主题类构成第 4 处平行——改主题色时同样要顾及（详见 7.8）。
+- **元数据配色三处平行**：`FM_PALETTE`（内联样式，app.js:341）、`getThemeStyles()`（复制用内联样式，app.js:1030）、`style.css` 的 `.theme-*`——改主题色时都要顾及。
 - **DOM 结构约束**：`js/app.js` 通过 `$('#id')` 取元素，改 HTML 需保持 id 不变或同步改 JS。
 - **引用块样式两条禁令**：不得写 `blockquote p { margin: 0 }`（多段引用会粘死，段间距实测 0px）；不得把次要文字色声明在 `blockquote` 本体上（引用内 `h1–h6` 会被一起染灰）。首/末子元素归零由 `.markdown-body blockquote > :first-child / :last-child` 两条共用规则统一处理——详见第 8 节。
 - **复制路径要跟着改**：`getThemeStyles()` 里的样式字符串与 `style.css` 的主题类平行维护，改一处必须改两处；`bq-test.js` 的 A 段会对两边同时做静态断言。
 - **本文与 ROADMAP 里的 `app.js:NNN` 行号会随代码增长漂移**：改完代码后请用 `grep -n` 复核，或直接用函数名定位（每次改动 `app.js` 后至少会漂一次，历史上已发生多轮）。
 - **导出相关的三个连带点**：① 主题色有 4 处平行（`style.css` 的 `.theme-*`、`getThemeStyles()`、`FM_PALETTE`、导出外壳 `EXPORT_PAGE_CSS` / `WORD_COMPAT_CSS`）；② 把 CDN CSS 文本内联进导出文件前必须绝对化其中的 `url()`，否则 KaTeX 的 `@font-face` 全部 404；③ 块级公式能否渲染取决于 `renderMath()` 开头的 `unfoldDisplayMath()` 有没有把 `breaks: true` 造出来的 `<br>` 合回文本节点，动这块时别漏。
-- **预览容器的 class 只有一个出口**：`preview.className` 一律经 `syncPreviewClass()`（app.js:854）拼装（主题 + 方格 + 设备档三维）。全文只允许一处写 `preview.className = [`，别处整串覆盖会静默冲掉其余维度；`device-*` 是观察工具，**进产物前必须在两条克隆路径上剥掉**（`stripPreviewModeClasses()`，app.js:931）。
+- **预览容器的 class 只有一个出口**：`preview.className` 一律经 `syncPreviewClass()`（app.js:882）拼装（主题 + 方格 + 设备档三维）。全文只允许一处写 `preview.className = [`，别处整串覆盖会静默冲掉其余维度；`device-*` 是观察工具，**进产物前必须在两条克隆路径上剥掉**（`stripPreviewModeClasses()`，app.js:959）。
 - **设备档的选择器要写两级**：`.markdown-body.device-app` 而非 `.device-app`——主题段 `.theme-*` 同样声明 `font-size`，且排在设备档之后，单级选择器会被顶掉。详见 7.9。
-- **Mermaid 图内度量是第 5 处平行**：`style.css` 的 `.markdown-body .mermaid-rendered svg *`、`MERMAID_LOCK_CSS`（app.js:1082，导出 HTML / 复制公众号 / 导出 Word 三处产物共用）必须保持同一组取值（字体 / 字号 16px / 行高 `normal` / 字距 `normal` / `margin:0`）。**放大浮层里的克隆图是第 6 处**（`.mermaid-zoom-figure svg *`，同样一份）——浮层不在 `.markdown-body` 内，继承不到网页那份。mermaid 按字体原生的 `normal` 行高把节点框与 `foreignObject` 量好再画字，超出即被裁；主题与设备档的行高（1.6–1.75）、字距（APP 档 +.5px）、字体一旦继承进 SVG，节点文字就会被切掉一截。⚠️ 钉**固定倍数**（如 1.5）会只对**纯拉丁文**标签露馅——它每行比量算值高 5px，中文恰好相等所以看不出来。改了 `mermaid.initialize()` 的 `fontFamily` / `fontSize` 要同步这几处。ex-test 静态段锁 11 条（并逐字比对 `style.css` 与 `MERMAID_LOCK_CSS`）。
+- **Mermaid 图内度量是第 5 处平行**：`style.css` 的 `.markdown-body .mermaid-rendered svg *`、`MERMAID_LOCK_CSS`（app.js:1110，导出 HTML / 复制公众号 / 导出 Word 三处产物共用）必须保持同一组取值（字体 / 字号 16px / 行高 `normal` / 字距 `normal` / `margin:0`）。**放大浮层里的克隆图是第 6 处**（`.mermaid-zoom-figure svg *`，同样一份）——浮层不在 `.markdown-body` 内，继承不到网页那份。mermaid 按字体原生的 `normal` 行高把节点框与 `foreignObject` 量好再画字，超出即被裁；主题与设备档的行高（1.6–1.75）、字距（APP 档 +.5px）、字体一旦继承进 SVG，节点文字就会被切掉一截。⚠️ 钉**固定倍数**（如 1.5）会只对**纯拉丁文**标签露馅——它每行比量算值高 5px，中文恰好相等所以看不出来。改了 `mermaid.initialize()` 的 `fontFamily` / `fontSize` 要同步这几处。ex-test 静态段锁 11 条（并逐字比对 `style.css` 与 `MERMAID_LOCK_CSS`）。

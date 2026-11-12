@@ -600,6 +600,29 @@ $$
   }
 
   // ===== Mermaid Rendering (post-process from DOM) =====
+  //
+  // ⚠️ 两个实测坑（取证：tools/mermaid-err.js；2026-11-12）
+  // ① 代码块写错时，mermaid 10 会把「炸弹 + Syntax error in text / mermaid version」
+  //    那张错误图塞进 **body 末尾**的 `<div id="d<id>">`，并且**不回收**它。id 每次自增，
+  //    于是每错一次就多一坨；正文改对之后这些壳子仍然挂在页面最底部（用户报的
+  //    「改好了提示也不消失」就是它）。修法：每张图渲染收尾（成功 / 失败都算）按自己的
+  //    id 精确摘掉临时壳，别去全局扫 body（并发渲染时可能误删别人还没画完的壳）。
+  // ② 失败信息里带源码原文，直接拼进 innerHTML 会被当标签解析 → 一律 escapeHtml。
+  function dropMermaidStray(id) {
+    // 错误壳固定是 body 的直接子级：<div id="d<id>"> 里包着错误图 <svg id="<id>">
+    ['d' + id, id].forEach((domId) => {
+      const node = document.getElementById(domId);
+      if (node && node.parentElement === document.body) node.remove();
+    });
+  }
+
+  function mermaidErrorHtml(err) {
+    const raw = String((err && err.message) || err || '未知错误').trim();
+    return '<div class="mermaid-error-title">Mermaid 语法错误</div>' +
+      '<pre class="mermaid-error-msg">' + escapeHtml(raw) + '</pre>' +
+      '<div class="mermaid-error-hint">改好代码块后会立即重新渲染</div>';
+  }
+
   function renderMermaidFromDOM() {
     if (!window.mermaid) return;
 
@@ -614,18 +637,23 @@ $$
       div.className = 'mermaid-rendered';
 
       const mermaidId = `mermaid-svg-${mermaidCounter++}`;
-      try {
-        mermaid.render(mermaidId, code).then((result) => {
+      // 统一走 async：成功 / 失败共用一段收尾（摘错误壳 + 把 <pre> 换成渲染块）
+      (async () => {
+        try {
+          const result = await mermaid.render(mermaidId, code);
           div.innerHTML = result.svg;
+        } catch (err) {
+          // 错误块没有 svg：摘掉 .mermaid-rendered，免得点它触发放大、光标留在 zoom-in。
+          // 出图块的 text-align:center 是**内联**的（内联压得住类样式），错误卡片要清掉它，
+          // 否则 mermaid 那段对齐用的源码/插入符会被居中，完全没法读。
+          div.className = 'mermaid-error';
+          div.style.textAlign = '';
+          div.innerHTML = mermaidErrorHtml(err);
+        } finally {
+          dropMermaidStray(mermaidId);
           pre.replaceWith(div);
-        }).catch((err) => {
-          div.innerHTML = `<div style="color:#ef4444;padding:12px;font-size:13px;">Mermaid 渲染失败: ${err.message || err}</div>`;
-          pre.replaceWith(div);
-        });
-      } catch (err) {
-        div.innerHTML = `<div style="color:#ef4444;padding:12px;font-size:13px;">Mermaid 渲染失败: ${err.message || err}</div>`;
-        pre.replaceWith(div);
-      }
+        }
+      })();
     });
   }
 

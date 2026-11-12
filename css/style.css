@@ -2068,3 +2068,56 @@ body.is-editing-focus .editor {
     display: block !important;
   }
 }
+
+/* ===== Mermaid 语法错误卡片（2026-11-12）=====
+   起因：mermaid 10 渲染失败时会把「炸弹 + Syntax error in text / mermaid version」
+   那张错误图**追加到 body 末尾**且不回收，改好代码它也不消失（详见 js/app.js 里
+   renderMermaidFromDOM 的注释）。现在错误只落在代码块原位：一张安静的卡片，
+   正文照常排版，报错保留 mermaid 原话（含行号），方便直接改。
+   注意：错误块不带 .mermaid-rendered，所以不会挂上 cursor:zoom-in，也点不开放大浮层。 */
+.markdown-body .mermaid-error {
+  margin: 16px 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(239, 68, 68, .28);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius);
+  background: #fef7f7;
+  text-align: left;
+  cursor: default;
+}
+.markdown-body .mermaid-error-title {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: #b91c1c;
+  margin: 0 0 6px;
+}
+/* 报错正文：三处都要压住主题的 pre 规则（.theme-github pre / .device-app pre 都更具体） */
+.markdown-body .mermaid-error .mermaid-error-msg {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 0;
+  font-family: Consolas, Monaco, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  letter-spacing: normal;
+  color: #7f1d1d;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.markdown-body .mermaid-error-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #b91c1c;
+  opacity: .72;
+}
+
+/* 打印时错误卡片跟着正文走（它本身是内容问题，不该被藏掉），只保证不跨页断开 */
+@media print {
+  .markdown-body .mermaid-error {
+    break-inside: avoid;
+  }
+}
